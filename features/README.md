@@ -1,6 +1,6 @@
 ---
 skill: ezk-backlog
-layout_version: 3
+layout_version: 4
 ---
 
 # Features — backlog du projet
