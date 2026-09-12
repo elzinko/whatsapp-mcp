@@ -64,18 +64,34 @@ version à l'autre (sinon Claude réinitialise les permissions d'outils). `insta
 
 ## Critères d'acceptation
 
-- [ ] Le serveur déployé tourne depuis `~/.local/share/whatsapp-mcp/current`, **jamais** depuis un
+- [x] Le serveur déployé tourne depuis `~/.local/share/whatsapp-mcp/current`, **jamais** depuis un
       checkout git — un working tree cassé (ex. `node_modules` absent) **ne casse pas** le déployé.
-- [ ] `bin/whatsapp-mcp` (shim) démarre le serveur avec le node stable et l'état sous
-      `~/.config/whatsapp-mcp/`, sans variable posée à la main.
-- [ ] Figer une version + basculer `current` = un geste ; l'appairage et les grants (sous
-      `~/.config/whatsapp-mcp/`) **ne sont pas touchés** par une bascule.
-- [ ] `revert` ramène `current` sur la version précédente en un geste ; l'état survit.
-- [ ] `dev deploy` déploie la branche de travail sur un rail à part **sans** toucher `current` ; on
-      peut la tester puis la promouvoir.
-- [ ] Faire tourner stable + dev **en parallèle** est documenté : appairage de dev séparé
+      *(le shim résout `current` et charge ses dépendances figées ; poignée de main MCP e2e OK)*
+- [x] `bin/whatsapp-mcp` (shim) démarre le serveur avec le node stable et l'état sous
+      `~/.config/whatsapp-mcp/`, sans variable posée à la main. *(test `test/deploy-shim.js`)*
+- [x] Figer une version + basculer `current` = un geste ; l'appairage et les grants (sous
+      `~/.config/whatsapp-mcp/`) **ne sont pas touchés** par une bascule. *(l'état vit hors du
+      `DEPLOY_ROOT` ; test `test/deploy-local.js`)*
+- [x] `revert` ramène `current` sur la version précédente en un geste ; l'état survit.
+- [x] `dev deploy` déploie la branche de travail sur un rail à part **sans** toucher `current` ; on
+      peut la tester puis la promouvoir *(promotion = merger puis `npm run deploy`)*.
+- [x] Faire tourner stable + dev **en parallèle** est documenté : appairage de dev séparé
       (`~/.config/whatsapp-mcp-dev/`, connecteur `whatsapp-feat`) en phase 1 ; démon (0005) en phase 2.
-- [ ] `install:client` pointe `current` et pose l'`env` d'état ; le nom de connecteur reste `whatsapp-mcp`.
+      *(voir [docs/deploiement-local.md](../docs/deploiement-local.md))*
+- [x] `install:client` pointe `current` et pose l'`env` d'état ; le nom de connecteur reste `whatsapp-mcp`.
+      *(env posé par le shim pour la stable ; en dur dans l'entrée pour le rail dev)*
+
+## État d'implémentation (2026-09-12)
+
+**Livré et testé automatiquement** (`npm test` + un e2e de poignée de main MCP contre le serveur figé) :
+`bin/whatsapp-mcp` (shim), `scripts/deploy-local.sh` (`deploy` / `--dev` / `--list` / `--revert` /
+`--rollback` / `--print`), `scripts/install-client.js` (stable + `--dev`),
+helpers `src/setup.js`, scripts npm `deploy` · `deploy:dev` · `deploy:list` · `deploy:revert` · `install:client:dev`.
+
+**Reste à faire par un humain** (touche l'environnement réel) : brancher **ton** Desktop sur `current`
+et vérifier la version via `whatsapp_status` ; rejouer le contre-test `rm -rf node_modules` ; scanner
+le QR du rail dev (`whatsapp-feat`) pour valider le parallèle. **Suite optionnelle** : porter `update`
+(re-tirer un tag sans clone) ; le démon = [fiche 0005](0005-demon-frontends-mcp.md).
 
 ## Comment vérifier
 
