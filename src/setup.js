@@ -5,6 +5,7 @@
 // configure JAMAIS un client (frontière fiche 0012) ; ici c'est une CLI lancée par
 // l'humain, son geste au terminal EST le consentement.
 
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -90,4 +91,16 @@ export function devShimPath(env = process.env, home = os.homedir()) {
 // disputeraient le même appairage (contrainte « une seule session » de l'ADR-0007).
 export function devStateRoot(home = os.homedir()) {
   return path.join(home, ".config", "whatsapp-mcp-dev");
+}
+
+// Version DÉPLOYÉE : le fichier VERSION que deploy-local.sh écrit dans chaque copie
+// figée (ex. « de985f3 », « dev@<sha> » pour le rail dev). Absent = lancement depuis le
+// checkout -> « dev », la signature du dossier de travail. `readFileSync` injecté pour test.
+export function deployedVersion(projectRoot, readFileSync = fs.readFileSync) {
+  try {
+    const v = String(readFileSync(path.join(projectRoot, "VERSION"), "utf8")).trim();
+    return v || "dev";
+  } catch {
+    return "dev";
+  }
 }

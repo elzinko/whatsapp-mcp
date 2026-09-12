@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_TTL_MS as DEFAULT_SESSION_TTL_MS } from "./sessions.js";
+import { deployedVersion } from "./setup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -99,6 +100,10 @@ const sessionTtlMs = (() => {
 
 export const config = {
   projectRoot,
+  // Version servie (ADR-0007) : lue dans le fichier VERSION de la copie figée, « dev »
+  // si on tourne depuis le checkout. Exposée par whatsapp_status pour vérifier d'un
+  // coup d'œil QUELLE build répond (déployée vs dossier de travail).
+  deployedVersion: deployedVersion(projectRoot),
   // Amorçage uniquement : au tout premier démarrage, si aucun grant n'existe encore,
   // ce groupe est converti en grant de lecture. Ensuite, settings.json fait foi et
   // ces variables ne servent plus à rien (voir ADR-0001).

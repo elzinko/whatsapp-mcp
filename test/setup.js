@@ -10,6 +10,7 @@ import {
   currentShimPath,
   devShimPath,
   devStateRoot,
+  deployedVersion,
 } from "../src/setup.js";
 
 let failed = false;
@@ -117,6 +118,12 @@ check(
   "devStateRoot : distinct de la stable (~/.config/whatsapp-mcp-dev)",
   devStateRoot("/Users/test") === "/Users/test/.config/whatsapp-mcp-dev"
 );
+
+// --- deployedVersion (readFileSync injecté, aucun accès disque) ---
+check("deployedVersion : lit le fichier VERSION", deployedVersion("/x", () => "de985f3\n") === "de985f3");
+check("deployedVersion : dev@<sha> préservé", deployedVersion("/x", () => "dev@abc1234\n") === "dev@abc1234");
+check("deployedVersion : VERSION absent -> 'dev'", deployedVersion("/x", () => { throw new Error("ENOENT"); }) === "dev");
+check("deployedVersion : VERSION vide -> 'dev'", deployedVersion("/x", () => "  \n") === "dev");
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
 process.exit(failed ? 1 : 0);
