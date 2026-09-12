@@ -6,6 +6,8 @@ import {
   resolveStableNode,
   mergeMcpServer,
   desktopConfigPath,
+  deployRoot,
+  currentShimPath,
 } from "../src/setup.js";
 
 let failed = false;
@@ -84,6 +86,26 @@ check(
   desktopConfigPath("/Users/test").endsWith(
     "/Library/Application Support/Claude/claude_desktop_config.json"
   )
+);
+
+// --- deployRoot / currentShimPath (ADR-0007) ---
+check(
+  "deployRoot : défaut ~/.local/share/whatsapp-mcp",
+  deployRoot({}, "/Users/test") === "/Users/test/.local/share/whatsapp-mcp"
+);
+check(
+  "deployRoot : WHATSAPP_DEPLOY_ROOT l'emporte",
+  deployRoot({ WHATSAPP_DEPLOY_ROOT: "/tmp/dep" }, "/Users/test") === "/tmp/dep"
+);
+check(
+  "currentShimPath : pointe current/bin/whatsapp-mcp sous la racine",
+  currentShimPath({}, "/Users/test") ===
+    "/Users/test/.local/share/whatsapp-mcp/current/bin/whatsapp-mcp"
+);
+check(
+  "currentShimPath : suit l'override de racine",
+  currentShimPath({ WHATSAPP_DEPLOY_ROOT: "/tmp/dep" }, "/Users/test") ===
+    "/tmp/dep/current/bin/whatsapp-mcp"
 );
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");

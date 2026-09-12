@@ -64,3 +64,18 @@ export function desktopConfigPath(home = os.homedir()) {
     "claude_desktop_config.json"
   );
 }
+
+// Racine des versions figées (blue-green, ADR-0007). MÊME défaut que
+// scripts/deploy-local.sh (DEPLOY_ROOT) — garder les deux synchronisés. Surchargeable
+// par WHATSAPP_DEPLOY_ROOT. `env`/`home` injectés pour test.
+export function deployRoot(env = process.env, home = os.homedir()) {
+  const override = (env.WHATSAPP_DEPLOY_ROOT || "").trim();
+  return override || path.join(home, ".local", "share", "whatsapp-mcp");
+}
+
+// Chemin du shim de la version COURANTE : c'est lui que le client (Desktop/Code)
+// doit lancer, jamais un checkout. `current` est un lien vers la version figée ;
+// le shim résout ce lien à chaque lancement (bascule = un seul ln -sfn).
+export function currentShimPath(env = process.env, home = os.homedir()) {
+  return path.join(deployRoot(env, home), "current", "bin", "whatsapp-mcp");
+}
