@@ -79,3 +79,15 @@ export function deployRoot(env = process.env, home = os.homedir()) {
 export function currentShimPath(env = process.env, home = os.homedir()) {
   return path.join(deployRoot(env, home), "current", "bin", "whatsapp-mcp");
 }
+
+// Rail DEV (ADR-0007) : un slot « dev » à part, jamais pointé par « current », et un
+// état séparé (donc un appairage WhatsApp propre) pour tourner en parallèle de la stable.
+export function devShimPath(env = process.env, home = os.homedir()) {
+  return path.join(deployRoot(env, home), "dev", "bin", "whatsapp-mcp");
+}
+
+// Racine d'état du rail dev : distincte de la stable, sinon les deux serveurs se
+// disputeraient le même appairage (contrainte « une seule session » de l'ADR-0007).
+export function devStateRoot(home = os.homedir()) {
+  return path.join(home, ".config", "whatsapp-mcp-dev");
+}

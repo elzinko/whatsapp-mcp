@@ -48,6 +48,8 @@ usage() {
 deploy-local.sh — fige une version hors du dossier de travail, bascule « current ».
   (défaut)          fige HEAD (arbre propre requis), bascule current
   --tag <v>         fige ce tag, quel que soit HEAD
+  --dev             fige la branche de travail (MÊME sale) sur le rail « dev »,
+                    SANS toucher current (connecteur séparé whatsapp-feat)
   --list            versions figées (* = current)
   --revert          rebascule current sur « previous »
   --rollback <v>    rebascule current sur la version <v>
@@ -63,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --tag) shift; WANT_TAG="${1:-}" ;;
     --tag=*) WANT_TAG="${1#*=}" ;;
     --list) MODE="list" ;;
+    --dev) MODE="dev" ;;
     --revert) MODE="revert" ;;
     --rollback) shift; ROLLBACK_TO="${1:-}"; MODE="rollback" ;;
     --rollback=*) ROLLBACK_TO="${1#*=}"; MODE="rollback" ;;
@@ -137,6 +140,58 @@ if [[ "$MODE" == "rollback" ]]; then
   point_current_at "$ROLLBACK_TO"
   ok "current → $ROLLBACK_TO"
   human_gesture
+  exit 0
+fi
+
+# ── --dev (rail de test parallèle, NE TOUCHE PAS current) ────────────────────
+# Déploie la branche de travail — même sale — sur un slot « dev » à part, avec son
+# propre connecteur (whatsapp-feat) et son propre état (~/.config/whatsapp-mcp-dev,
+# donc son propre appairage). Règle de l'ADR-0007 : une commande de dev ne bascule
+# JAMAIS la stable. C'est le « déployer la dev pour la tester » demandé.
+if [[ "$MODE" == "dev" ]]; then
+  step "Contrôles (rail dev)"
+  command -v git >/dev/null 2>&1 || die "git est requis"
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "$REPO_ROOT n'est pas un dépôt git"
+  # Instantané du working tree, MÊME sale. « git stash create » fabrique un commit
+  # de l'état courant SANS rien empiler sur la pile de stash (partagée entre worktrees) :
+  # aucun git stash push/pop, donc rien à un autre worktree. Vide si l'arbre est propre.
+  ref="$(git -C "$REPO_ROOT" stash create 2>/dev/null || true)"
+  [[ -n "$ref" ]] || ref="HEAD"
+  sha="$(git -C "$REPO_ROOT" rev-parse --short "$ref")"
+  # NB : « stash create » capture les fichiers SUIVIS modifiés, pas les nouveaux
+  # fichiers non suivis — ajoute-les (git add) pour les inclure dans le rail dev.
+  ok "instantané de la branche de travail : $sha (current reste « $(current_version) »)"
+  if [[ -n "$DRY" ]]; then
+    ok "dry-run : figerait le rail dev depuis $sha, connecteur whatsapp-feat, sans toucher current"
+    exit 0
+  fi
+  DEVSLOT="$DEPLOY_ROOT/dev"
+  mkdir -p "$DEPLOY_ROOT"
+  tmp="$(mktemp -d "$DEPLOY_ROOT/.tmp-XXXXXX")"
+  git -C "$REPO_ROOT" archive "$ref" | tar -x -C "$tmp" || { rm -rf "$tmp"; die "échec de git archive (dev)"; }
+  step "Dépendances du rail dev"
+  if [[ -f "$tmp/package-lock.json" ]]; then
+    ( cd "$tmp" && npm ci --omit=dev --no-audit --no-fund ) || { rm -rf "$tmp"; die "npm ci (dev) a échoué"; }
+  else
+    ( cd "$tmp" && npm install --omit=dev --no-audit --no-fund ) || { rm -rf "$tmp"; die "npm install (dev) a échoué"; }
+  fi
+  printf '%s\n'    "$REPO_ROOT" > "$tmp/.source"
+  printf 'dev@%s\n' "$sha"      > "$tmp/VERSION"
+  [[ -f "$tmp/bin/whatsapp-mcp" ]] && chmod +x "$tmp/bin/whatsapp-mcp"
+  rm -rf "$DEVSLOT"          # le rail dev est un slot unique, réécrit à chaque fois
+  mv "$tmp" "$DEVSLOT"
+  ok "rail dev figé : $DEVSLOT"
+  ok "current INCHANGÉ : $(current_version)"
+  cat <<EOF
+
+${B}Il reste un geste — à toi${N} (rail dev, en parallèle de la stable) :
+
+  cd "$DEVSLOT" && npm run install:client:dev
+  # branche le connecteur « whatsapp-feat » (état séparé ~/.config/whatsapp-mcp-dev).
+  # Quitte/relance Claude Desktop. La première fois, whatsapp-feat demandera SON
+  # propre QR : c'est l'appairage séparé (phase 1 de l'ADR-0007), pour tourner en
+  # même temps que la stable sans guerre de session.
+EOF
   exit 0
 fi
 

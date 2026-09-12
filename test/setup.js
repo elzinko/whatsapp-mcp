@@ -8,6 +8,8 @@ import {
   desktopConfigPath,
   deployRoot,
   currentShimPath,
+  devShimPath,
+  devStateRoot,
 } from "../src/setup.js";
 
 let failed = false;
@@ -106,6 +108,14 @@ check(
   "currentShimPath : suit l'override de racine",
   currentShimPath({ WHATSAPP_DEPLOY_ROOT: "/tmp/dep" }, "/Users/test") ===
     "/tmp/dep/current/bin/whatsapp-mcp"
+);
+check(
+  "devShimPath : slot dev sous la racine",
+  devShimPath({}, "/Users/test") === "/Users/test/.local/share/whatsapp-mcp/dev/bin/whatsapp-mcp"
+);
+check(
+  "devStateRoot : distinct de la stable (~/.config/whatsapp-mcp-dev)",
+  devStateRoot("/Users/test") === "/Users/test/.config/whatsapp-mcp-dev"
 );
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");

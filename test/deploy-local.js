@@ -117,11 +117,22 @@ try {
   check("dry-run : n'a PAS figé v3", !fs.existsSync(path.join(deployRoot, v3)));
   check("dry-run : current inchangé (toujours v2)", linkTarget(path.join(deployRoot, "current")) === v2);
 
-  // --- 7. Arbre sale : refus (le rail dev, lui, déploiera une branche sale) ---
+  // --- 7. Arbre sale : refus côté stable (le rail dev, lui, déploiera une branche sale) ---
   fs.appendFileSync(path.join(repo, "src-index-marker"), "modif non commitée\n");
   r = deploy([], env);
   check("arbre sale : refus", r.code !== 0);
   check("arbre sale : message explicite", r.out.includes("sale"));
+
+  // --- 8. --dev : déploie MÊME un arbre sale, SANS toucher current ---
+  // (l'arbre est encore sale depuis l'étape 7 — c'est le cas d'usage du rail dev)
+  r = deploy(["--dev", "--print"], env);
+  check("dev dry-run : succès", r.code === 0);
+  check("dev dry-run : ne crée pas le slot dev", !fs.existsSync(path.join(deployRoot, "dev")));
+  r = deploy(["--dev"], env);
+  check("dev : succès sur un arbre sale", r.code === 0);
+  check("dev : slot dev créé", fs.existsSync(path.join(deployRoot, "dev", "VERSION")));
+  check("dev : VERSION préfixée « dev@ »", fs.readFileSync(path.join(deployRoot, "dev", "VERSION"), "utf8").startsWith("dev@"));
+  check("dev : current NON touché (toujours v2)", linkTarget(path.join(deployRoot, "current")) === v2);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

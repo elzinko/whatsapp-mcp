@@ -21,6 +21,8 @@ import {
   mergeMcpServer,
   desktopConfigPath,
   currentShimPath,
+  devShimPath,
+  devStateRoot,
 } from "../src/setup.js";
 
 const die = (m) => {
@@ -28,14 +30,22 @@ const die = (m) => {
   process.exit(1);
 };
 
-// 0. Cible = le shim de la version COURANTE. On ne branche jamais le checkout : c'est
+// Deux rails (ADR-0007). Stable (défaut) : connecteur « whatsapp-mcp » → current, état
+// par défaut (~/.config/whatsapp-mcp). Dev (--dev) : connecteur « whatsapp-feat » → slot
+// dev, état séparé ~/.config/whatsapp-mcp-dev (appairage propre) posé EN DUR dans l'entrée
+// (Desktop lance sans notre PATH : c'est la seule façon de router le dev vers son état).
+const isDev = process.argv.includes("--dev");
+const connectorName = isDev ? "whatsapp-feat" : "whatsapp-mcp";
+const shim = isDev ? devShimPath() : currentShimPath();
+const entryEnv = isDev ? { WHATSAPP_MCP_STATE_ROOT: devStateRoot() } : undefined;
+
+// 0. Cible = le shim déployé du rail choisi. On ne branche jamais le checkout : c'est
 // tout l'intérêt du déploiement figé. Rien de déployé -> refus qui oriente vers `deploy`.
-const shim = currentShimPath();
 if (!fs.existsSync(shim)) {
+  const cmd = isDev ? "npm run deploy:dev" : "npm run deploy";
   die(
-    `rien de déployé — ${shim} est absent.\n` +
-      `  Déploie d'abord une version depuis le checkout (arbre propre) :\n` +
-      `    npm run deploy\n` +
+    `rien de déployé pour le rail ${isDev ? "dev" : "stable"} — ${shim} est absent.\n` +
+      `  Déploie d'abord : ${cmd}\n` +
       `  puis relance cette commande. Voir ADR-0007.`
   );
 }
@@ -87,18 +97,21 @@ if (raw !== null) {
 // command = le shim ; args vide : le shim trouve node et pose l'état lui-même. Le nom
 // de connecteur reste « whatsapp-mcp » (le changer ferait réinitialiser les permissions
 // d'outils par Claude — leçon google, ADR-0007).
-const merged = mergeMcpServer(existing, "whatsapp-mcp", {
-  command: shim,
-  args: [],
-});
+const entry = { command: shim, args: [] };
+if (entryEnv) entry.env = entryEnv; // dev : route vers son état séparé
+const merged = mergeMcpServer(existing, connectorName, entry);
 fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
 fs.writeFileSync(cfgPath, `${JSON.stringify(merged, null, 2)}\n`);
-console.log(`✓ whatsapp-mcp branché sur la version déployée (current)`);
+console.log(`✓ ${connectorName} branché sur la version déployée (${isDev ? "rail dev" : "current"})`);
 console.log(`  ${cfgPath}`);
 console.log(`  command: ${shim}`);
-console.log(`  état    : ~/.config/whatsapp-mcp/ (posé par le shim, hors du code)`);
+console.log(`  état    : ${isDev ? `${devStateRoot()}/ (appairage séparé, posé en dur)` : "~/.config/whatsapp-mcp/ (posé par le shim, hors du code)"}`);
 console.log("  → Rouvre Claude Desktop pour charger le serveur.");
 
 // 6. Claude Code : imprimer la commande (ne pas écrire ~/.claude.json à la main)
 console.log("\nPour Claude Code, lance :");
-console.log(`  claude mcp add whatsapp-mcp -- ${shim}`);
+if (isDev) {
+  console.log(`  claude mcp add ${connectorName} -e WHATSAPP_MCP_STATE_ROOT=${devStateRoot()} -- ${shim}`);
+} else {
+  console.log(`  claude mcp add ${connectorName} -- ${shim}`);
+}
