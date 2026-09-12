@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# whatsapp-mcp — lanceur STABLE du serveur MCP (Claude Desktop / Code / manuel).
+#
+# Pourquoi ce shim existe (ADR-0007) :
+#   Avant, Claude Desktop lançait src/index.js DIRECTEMENT depuis le dossier de
+#   travail. Dès que ce dossier bougeait — renommage, node_modules pas réinstallé,
+#   refacto à moitié faite — le serveur déployé cassait. C'est l'incident du
+#   2026-09-11 (« Cannot find package '@modelcontextprotocol/sdk' » en boucle).
+#   Ce shim rompt ce couplage : il vit dans une version FIGÉE
+#   (~/.local/share/whatsapp-mcp/<tag>/, pointée par le lien « current ») et lance
+#   le src/index.js de SON propre dossier — jamais celui du checkout.
+#
+# Trois rôles, dans l'ordre :
+#   1. Résoudre son vrai dossier, même appelé via le lien « current » (ou un lien
+#      posé dans le PATH). C'est ce qui fait qu'il lance la version figée.
+#   2. Poser l'état HORS du code : les variables WHATSAPP_* pointent une racine
+#      d'état (défaut ~/.config/whatsapp-mcp). Une mise à jour ou un rollback ne
+#      touchent alors jamais l'appairage ni les grants.
+#   3. Trouver un node à chemin stable (même liste que src/setup.js) puis exec le
+#      serveur — Claude Desktop lance avec un PATH minimal, « node » nu échouerait.
+#
+# Racine d'état surchargeable par WHATSAPP_MCP_STATE_ROOT : c'est le rail dev qui
+# s'en sert pour son appairage séparé (~/.config/whatsapp-mcp-dev). Chaque
+# WHATSAPP_* reste surchargeable une par une (un override explicite gagne).
+set -euo pipefail
+
+# ── 1. Dossier réel de ce shim ───────────────────────────────────────────────
+# On suit d'abord un éventuel lien sur le FICHIER lui-même (ex. lien dans
+# /usr/local/bin), puis « pwd -P » résout les composants-répertoires restants —
+# dont « current » → <tag>. Résultat : ROOT = la version figée, résolue À CHAQUE
+# lancement (donc « current » est bien tardivement lié : basculer current suffit).
+src="${BASH_SOURCE[0]:-$0}"
+while [[ -L "$src" ]]; do
+  link="$(readlink "$src")"
+  case "$link" in
+    /*) src="$link" ;;
+    *)  src="$(dirname "$src")/$link" ;;
+  esac
+done
+HERE="$(cd "$(dirname "$src")" && pwd -P)"
+ROOT="$(cd "$HERE/.." && pwd -P)"
+
+# ── 2. État hors du code ─────────────────────────────────────────────────────
+STATE_ROOT="${WHATSAPP_MCP_STATE_ROOT:-$HOME/.config/whatsapp-mcp}"
+# Miroir des chemins résolus dans src/config.js. Un chemin ABSOLU y sort déjà
+# l'état du checkout (path.resolve ignore projectRoot si le 2ᵉ arg est absolu).
+export WHATSAPP_AUTH_DIR="${WHATSAPP_AUTH_DIR:-$STATE_ROOT/auth}"
+export WHATSAPP_AUTH_LOCK="${WHATSAPP_AUTH_LOCK:-$STATE_ROOT/auth.lock}"
+export WHATSAPP_DATA_DIR="${WHATSAPP_DATA_DIR:-$STATE_ROOT/data}"
+export WHATSAPP_SETTINGS_FILE="${WHATSAPP_SETTINGS_FILE:-$STATE_ROOT/settings.json}"
+export WHATSAPP_ALLOWLIST_FILE="${WHATSAPP_ALLOWLIST_FILE:-$STATE_ROOT/allowlist.json}"
+export WHATSAPP_PROFILES_FILE="${WHATSAPP_PROFILES_FILE:-$STATE_ROOT/profiles.json}"
+export WHATSAPP_STRONG_AUTH_FILE="${WHATSAPP_STRONG_AUTH_FILE:-$STATE_ROOT/strong-auth.json}"
+export WHATSAPP_SESSIONS_DIR="${WHATSAPP_SESSIONS_DIR:-$STATE_ROOT/sessions}"
+mkdir -p "$STATE_ROOT"
+
+# ── 3. node stable puis exec ─────────────────────────────────────────────────
+# Même liste que STABLE_NODE_CANDIDATES dans src/setup.js — garder les deux
+# synchronisés. « exec » : pas de process bash qui traîne sous le serveur.
+NODE=""
+for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+  if [[ -x "$candidate" ]]; then NODE="$candidate"; break; fi
+done
+[[ -n "$NODE" ]] || NODE="$(command -v node || true)"
+[[ -n "$NODE" ]] || {
+  echo "whatsapp-mcp: node introuvable (ni /opt/homebrew, /usr/local, /usr/bin, ni dans le PATH)" >&2
+  exit 127
+}
+
+exec "$NODE" "$ROOT/src/index.js" "$@"
