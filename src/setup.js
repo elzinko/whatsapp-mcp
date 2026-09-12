@@ -104,3 +104,18 @@ export function deployedVersion(projectRoot, readFileSync = fs.readFileSync) {
     return "dev";
   }
 }
+
+// Claude Desktop tourne-t-il ? Il faut le savoir avant d'écrire sa config : s'il est
+// vivant, il la réécrit et efface notre ajout (le clobber observé le 2026-09-12).
+// PIÈGE macOS : le « comm » du process principal est son CHEMIN complet
+// (…/Claude.app/Contents/MacOS/Claude), donc « pgrep -x Claude » ne le matche JAMAIS —
+// c'est ce qui rendait la garde aveugle. On teste plutôt ce binaire précis dans la sortie
+// de « ps -axo comm= ». Pur : la sortie ps est injectée (I/O chez l'appelant, testable).
+// NB : « …/claude » minuscule = le CLI claude-code, PAS Desktop ; lui n'écrit pas
+// claude_desktop_config.json, donc on ne veut surtout pas le confondre (le « C » majuscule
+// et le suffixe exact suffisent à les distinguer).
+export function desktopRunningFrom(psCommOutput) {
+  return String(psCommOutput || "")
+    .split("\n")
+    .some((line) => line.trim().endsWith("/Claude.app/Contents/MacOS/Claude"));
+}

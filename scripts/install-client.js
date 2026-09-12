@@ -23,6 +23,7 @@ import {
   currentShimPath,
   devShimPath,
   devStateRoot,
+  desktopRunningFrom,
 } from "../src/setup.js";
 
 const die = (m) => {
@@ -57,15 +58,17 @@ if (!nodeVersionOk(process.version)) console.error(`⚠️  node ${process.versi
 if (stable.warning) console.error(`⚠️  ${stable.warning}`);
 
 // 2. Desktop tourne ? (l'app réécrit sa config en direct -> l'ajout serait effacé)
+// On liste les process et on cherche le binaire principal de Claude Desktop. « pgrep -x
+// Claude » ne suffit PAS : son comm est un chemin complet, jamais le nom nu (bug corrigé
+// le 2026-09-12). ps indisponible -> best-effort, on ne bloque pas (mieux vaut écrire).
 let desktopRunning = false;
 try {
-  execFileSync("pgrep", ["-x", "Claude"], { stdio: "ignore" });
-  desktopRunning = true;
+  desktopRunning = desktopRunningFrom(execFileSync("ps", ["-axo", "comm="], { encoding: "utf8" }));
 } catch {
-  /* pgrep exit != 0 => process non trouvé */
+  /* ps indisponible -> best-effort */
 }
 if (desktopRunning) {
-  die("Claude Desktop tourne — quitte-le complètement (Cmd-Q), puis relance cette commande. Sinon l'app efface l'ajout.");
+  die("Claude Desktop tourne — quitte-le complètement (Cmd-Q), attends l'arrêt, puis relance cette commande. Sinon l'app réécrit sa config et efface l'ajout.");
 }
 
 // 3-4. Config existante : LUE UNE SEULE FOIS. Pas de `existsSync` puis lecture/copie

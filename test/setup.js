@@ -11,6 +11,7 @@ import {
   devShimPath,
   devStateRoot,
   deployedVersion,
+  desktopRunningFrom,
 } from "../src/setup.js";
 
 let failed = false;
@@ -124,6 +125,21 @@ check("deployedVersion : lit le fichier VERSION", deployedVersion("/x", () => "d
 check("deployedVersion : dev@<sha> préservé", deployedVersion("/x", () => "dev@abc1234\n") === "dev@abc1234");
 check("deployedVersion : VERSION absent -> 'dev'", deployedVersion("/x", () => { throw new Error("ENOENT"); }) === "dev");
 check("deployedVersion : VERSION vide -> 'dev'", deployedVersion("/x", () => "  \n") === "dev");
+
+// --- desktopRunningFrom (le bug du 2026-09-12 : pgrep -x Claude était aveugle) ---
+check(
+  "desktop détecté par son binaire principal (chemin complet)",
+  desktopRunningFrom("/usr/sbin/cfprefsd\n/Applications/Claude.app/Contents/MacOS/Claude\n/bin/zsh") === true
+);
+check(
+  "claude-code (CLI, 'claude' minuscule) n'est PAS pris pour Desktop",
+  desktopRunningFrom("/Users/x/Library/Application Support/Claude/claude-code/2.1.266/claude.app/Contents/MacOS/claude") === false
+);
+check(
+  "helpers seuls / aucun Claude -> non détecté",
+  desktopRunningFrom("/Applications/Claude.app/Contents/Helpers/disclaimer\n/bin/zsh") === false
+);
+check("sortie vide -> non détecté", desktopRunningFrom("") === false);
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
 process.exit(failed ? 1 : 0);
