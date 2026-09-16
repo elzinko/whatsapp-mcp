@@ -33,6 +33,7 @@
 
 | # | Titre | Type | Prio | Épic | Statut | PR |
 |---|-------|------|------|------|--------|----|
+| [20260916130039008](20260916130039008_appairage-whatsapp-guide.md) | Appairage WhatsApp guidé — le MCP propose la connexion (élicitation, code, repli terminal) | feature | P1 |  | 💡 idea |  |
 | [0007](0007-elicitation-signee-touch-id.md) | Élicitation signée — consentement par authentification physique (Touch ID / Secure Enclave) | feature | P3 |  | 💡 idea |  |
 | [20260902223310640](20260902223310640_emballage-plugin-cowork-marketplace.md) | Emballage plugin Claude (marketplace elzinko) — skills + .mcp.json pour Cowork et Code | feature | P3 | 20260902223310355 | 💡 idea |  |
 
