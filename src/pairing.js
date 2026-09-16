@@ -97,6 +97,9 @@ export function buildPairingFlow({ isElicitationSupported, elicitInput, requestP
     }
 
     const pairingCode = await requestPairingCode(phoneNumber);
-    return { route: "elicitation", phoneNumber, pairingCode, message: buildPairingCodeMessage(pairingCode) };
+    // Ne JAMAIS renvoyer le numéro saisi : la réponse d'un outil MCP remonte dans le
+    // contexte du LLM, or la saisie d'élicitation doit rester hors de sa portée
+    // (ADR-0001/0002). Le numéro ne sert à rien en aval ; seul le code est affiché.
+    return { route: "elicitation", pairingCode, message: buildPairingCodeMessage(pairingCode) };
   };
 }

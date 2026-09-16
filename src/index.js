@@ -271,10 +271,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: "text", text: HELP_TEXT }] };
 
       case "whatsapp_pair": {
-        if (wa.isReady()) {
+        // Garde alignée sur les 4 outils d'accès (nothingPairedYet) : un grant persisté
+        // prouve un appairage passé, donc en reconnexion réseau on NE re-sollicite PAS
+        // le numéro (sinon on demande une donnée perso pour rien — revue P1).
+        if (!nothingPairedYet()) {
           return ok({
             route: "already-paired",
-            message: "WhatsApp est déjà appairé et connecté. Rien à faire.",
+            message: "WhatsApp est déjà appairé. Rien à faire.",
           });
         }
         const result = await pairingFlow();

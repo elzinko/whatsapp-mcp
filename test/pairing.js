@@ -105,6 +105,10 @@ try {
     check("avec élicitation -> le numéro saisi est transmis à requestPairingCode", seenPhoneNumber === "+33612345678");
     check("avec élicitation -> le code obtenu est renvoyé", res.pairingCode === "WXYZ-9876");
     check("avec élicitation -> message présente le code", res.message.includes("WXYZ-9876"));
+    check(
+      "avec élicitation -> le numéro saisi NE FUIT PAS dans le résultat (jamais vers le LLM, ADR-0001/0002)",
+      !JSON.stringify(res).includes("+33612345678")
+    );
   }
 
   // Client AVEC élicitation, decline -> refus, jamais de code demandé.
