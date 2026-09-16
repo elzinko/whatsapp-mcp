@@ -8,10 +8,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import makeWASocket, {
-  useMultiFileAuthState,
+import makeWASocketDefault, {
+  useMultiFileAuthState as useMultiFileAuthStateDefault,
   DisconnectReason,
-  fetchLatestBaileysVersion,
+  fetchLatestBaileysVersion as fetchLatestBaileysVersionDefault,
   Browsers,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
@@ -109,8 +109,15 @@ export function mayWipeAuth(ours, rawOnDisk) {
 }
 
 export class WhatsAppClient {
-  constructor(config, settings, allowlist, profile) {
+  // `deps` : Baileys injectable (fiche 20260916130039008 — teste la voie code
+  // d'appairage sans réseau ni vraie session). Absent -> le vrai Baileys, comme avant.
+  constructor(config, settings, allowlist, profile, deps) {
     this.config = config;
+    this.deps = deps || {
+      makeWASocket: makeWASocketDefault,
+      useMultiFileAuthState: useMultiFileAuthStateDefault,
+      fetchLatestBaileysVersion: fetchLatestBaileysVersionDefault,
+    };
     this.settings = settings; // Settings : les canaux autorisés (grants)
     // Le PLAFOND (ADR-0002) : borne les grants, l'ingestion et la lecture.
     // Absent = plafond vide = rien de servi (fail closed).
@@ -136,6 +143,9 @@ export class WhatsAppClient {
     this.sock = null;
     this.state = "starting"; // starting | qr | connecting | open | closed
     this.lastQR = null;
+    // Code d'appairage (voie 1, fiche 20260916130039008) : alternative textuelle au QR,
+    // jouable en élicitation. null tant qu'aucun n'a été demandé.
+    this.pairingCode = null;
     this.startedAt = Date.now();
     this.stores = new Map(); // jid -> MessageStore (un tampon + une archive par canal)
     this.knownGroups = new Map(); // jid -> nom, snapshot du dernier fetch
@@ -149,6 +159,22 @@ export class WhatsAppClient {
 
   isReady() {
     return this.state === "open" && !!this.sock;
+  }
+
+  // Demande un code d'appairage à Baileys pour le socket courant (voie 1, fiche
+  // 20260916130039008) : alternative textuelle au QR, présentable en élicitation.
+  // Appelable au démarrage (start(phoneNumber)) OU après coup, sur un socket déjà
+  // en attente de QR (outil MCP `whatsapp_pair`). Fail-safe : refuse plutôt que de
+  // redemander un code à un compte déjà enregistré (rien à ré-appairer).
+  async requestPairingCode(phoneNumber) {
+    if (!this.sock) throw new Error("Client WhatsApp non démarré.");
+    if (this.sock.authState?.creds?.registered) {
+      throw new Error("Ce compte WhatsApp est déjà appairé.");
+    }
+    const code = await this.sock.requestPairingCode(phoneNumber);
+    this.pairingCode = code;
+    log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
+    return code;
   }
 
   // Tampon d'un canal, créé à la demande et rattaché à son archive JSONL.
@@ -287,7 +313,10 @@ export class WhatsAppClient {
     return lockResult;
   }
 
-  async start() {
+  // `phoneNumber` (optionnel, fiche 20260916130039008) : voie 1 (code d'appairage),
+  // alternative au QR. N'affecte rien tant que le compte est DÉJÀ enregistré, et
+  // absent -> comportement EXISTANT inchangé (aucun appelant existant ne le fournit).
+  async start(phoneNumber) {
     // Le verrou est pris AVANT le premier contact avec auth/ (useMultiFileAuthState
     // juste en dessous). Le perdant n'ouvre rien : il sort proprement avec un message
     // qui dit quoi faire, sans jamais toucher au dossier auth/ (fiche 0009). Idempotent :
@@ -295,7 +324,7 @@ export class WhatsAppClient {
     // d'ouvrir le transport MCP.
     this.acquireLock();
 
-    const { state, saveCreds } = await useMultiFileAuthState(this.config.authDir);
+    const { state, saveCreds } = await this.deps.useMultiFileAuthState(this.config.authDir);
     // Baileys crée auth/ avec l'umask du process (souvent 0755, lisible par les autres
     // comptes) : on referme. Ce dossier contient les identifiants de session WhatsApp —
     // quiconque les lit peut se faire passer pour cet appareil lié.
@@ -309,7 +338,7 @@ export class WhatsAppClient {
     }
     let version;
     try {
-      ({ version } = await fetchLatestBaileysVersion());
+      ({ version } = await this.deps.fetchLatestBaileysVersion());
     } catch {
       version = undefined; // Baileys utilisera une version par défaut
     }
@@ -318,7 +347,7 @@ export class WhatsAppClient {
     // get_recent_messages répond dès le démarrage, sans attendre WhatsApp.
     for (const g of this.settings.list()) this._storeFor(g.jid);
 
-    const sock = makeWASocket({
+    const sock = this.deps.makeWASocket({
       version,
       auth: state,
       logger: pino({ level: "silent" }, pino.destination(2)), // Baileys -> stderr, muet
@@ -328,6 +357,17 @@ export class WhatsAppClient {
       syncFullHistory: false,
     });
     this.sock = sock;
+
+    // Voie 1 (fiche 20260916130039008) : un numéro fourni ET un compte pas encore
+    // enregistré -> demande un code d'appairage plutôt que d'attendre le QR. Un compte
+    // déjà enregistré ignore le numéro (rien à ré-appairer).
+    if (phoneNumber && !sock.authState?.creds?.registered) {
+      try {
+        await this.requestPairingCode(phoneNumber);
+      } catch (e) {
+        log("Impossible d'obtenir un code d'appairage :", e?.message);
+      }
+    }
 
     // Une écriture de creds qui échoue (ex: dossier auth supprimé sous nos pieds par
     // un autre process) ne doit JAMAIS crasher le serveur : rejet capté et journalisé.

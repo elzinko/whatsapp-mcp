@@ -19,6 +19,7 @@ import { Settings } from "./settings.js";
 import { Allowlist } from "./allowlist.js";
 import { Profiles } from "./profiles.js";
 import { buildConfirmGrant, buildGrantConsent, buildSessionConsent } from "./consent.js";
+import { buildGuidedPairingRefusal, buildPairingFlow } from "./pairing.js";
 import { readStrongAuthEnabled } from "./strongauth.js";
 import { checkPresence } from "./touchid.js";
 import { WhatsAppClient, log, toRecentMessage } from "./whatsapp.js";
@@ -101,6 +102,12 @@ const TOOLS = [
     name: "whatsapp_help",
     description:
       "Aide : ce qu'est ce serveur (LECTURE SEULE) et comment s'en servir — les 5 outils, le plafond (allowlist.json), le flux grant → lecture, et la note de sécurité. À appeler dès qu'on demande « c'est quoi ce MCP / comment je l'utilise ? ». Indirige vers le README pour le détail.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "whatsapp_pair",
+    description:
+      "Propose l'appairage WhatsApp quand rien n'est encore appairé (fiche appairage guidé). Si le client supporte l'élicitation, demande le numéro de téléphone puis affiche un code d'appairage à saisir sur le téléphone (WhatsApp > Appareils liés > Lier avec un numéro), sans QR. Sinon, renvoie la commande terminal exacte ('npm run pair') à lancer par un humain, qui écrit dans l'état partagé. Le serveur guide toujours, il ne s'appaire jamais lui-même.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -232,6 +239,16 @@ const TOOLS = [
   },
 ];
 
+// « Rien n'est appairé » (fiche 20260916130039008), à distinguer d'une reconnexion
+// transitoire : grant_channel EXIGE isReady() avant d'écrire un grant (voir
+// whatsapp.js#grantChannel), donc un grant PERSISTÉ prouve qu'un appairage a déjà
+// réussi au moins une fois — même si CE process est actuellement déconnecté/en
+// reconnexion. Ne guider que le cas « jamais rien n'a été appairé », pas chaque
+// coupure réseau.
+function nothingPairedYet() {
+  return !wa.isReady() && wa.settings.grants.size === 0;
+}
+
 function ok(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
@@ -252,6 +269,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     switch (name) {
       case "whatsapp_help":
         return { content: [{ type: "text", text: HELP_TEXT }] };
+
+      case "whatsapp_pair": {
+        if (wa.isReady()) {
+          return ok({
+            route: "already-paired",
+            message: "WhatsApp est déjà appairé et connecté. Rien à faire.",
+          });
+        }
+        const result = await pairingFlow();
+        if (result.route === "declined") {
+          return fail(`Appairage refusé par l'humain (${result.reason}).`);
+        }
+        return ok(result);
+      }
 
       case "whatsapp_status": {
         const grantConsent = readStrongAuthEnabled(config.strongAuthFile)
@@ -281,6 +312,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "list_groups": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
         const { groups, hiddenOutsideAllowlist, hiddenOutsideProfile } = await wa.listGroups();
         const resolvedSession = args.session ? sessions.resolve(args.session) : null;
         const inSession = resolvedSession ? new Set(resolvedSession.channels) : null;
@@ -308,12 +340,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "grant_channel":
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
         return ok(await wa.grantChannel(args.channel));
 
       case "revoke_channel":
         return ok(wa.revokeChannel(args.channel));
 
       case "session_open": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
         const requested = Array.isArray(args.channels) ? args.channels : [];
         if (requested.length === 0) return fail("Fournis au moins un canal ('channels').");
 
@@ -371,6 +405,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "get_recent_messages": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
         if (!args.session) {
           return fail(
             "Aucune session : cet outil exige un jeton de session. Ouvre-en une avec " +
@@ -446,6 +481,16 @@ wa.confirmGrant = buildGrantConsent({
   isStrongAuthEnabled: () => readStrongAuthEnabled(config.strongAuthFile),
   checkPresence,
   elicitationConsent,
+  log,
+});
+
+// Flux d'appairage guidé (fiche 20260916130039008), outil `whatsapp_pair` : demande
+// le numéro par élicitation (voie 1) si le client le permet, sinon renvoie la
+// procédure terminal (voie 2). Ne s'appaire jamais lui-même (ADR-0005).
+const pairingFlow = buildPairingFlow({
+  isElicitationSupported: () => clientSupportsElicitation,
+  elicitInput: (params) => server.elicitInput(params),
+  requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
   log,
 });
 
