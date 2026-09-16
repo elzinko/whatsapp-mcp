@@ -93,6 +93,15 @@ export function devStateRoot(home = os.homedir()) {
   return path.join(home, ".config", "whatsapp-mcp-dev");
 }
 
+// Racine d'état du rail STABLE (là où la version déployée range appairage/grants) —
+// MÊME défaut que le shim bin/whatsapp-mcp : WHATSAPP_MCP_STATE_ROOT || ~/.config/whatsapp-mcp.
+// Sert à doctor pour diagnostiquer la cible DÉPLOYÉE, pas le checkout où il est lancé (revue
+// Codex PR #38). Garder synchro avec le shim.
+export function deployedStateRoot(env = process.env, home = os.homedir()) {
+  const override = (env.WHATSAPP_MCP_STATE_ROOT || "").trim();
+  return override || path.join(home, ".config", "whatsapp-mcp");
+}
+
 // Version DÉPLOYÉE : le fichier VERSION que deploy-local.sh écrit dans chaque copie
 // figée (ex. « de985f3 », « dev@<sha> » pour le rail dev). Absent = lancement depuis le
 // checkout -> « dev », la signature du dossier de travail. `readFileSync` injecté pour test.

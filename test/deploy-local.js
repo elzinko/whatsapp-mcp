@@ -133,6 +133,13 @@ try {
   check("dev : slot dev créé", fs.existsSync(path.join(deployRoot, "dev", "VERSION")));
   check("dev : VERSION préfixée « dev@ »", fs.readFileSync(path.join(deployRoot, "dev", "VERSION"), "utf8").startsWith("dev@"));
   check("dev : current NON touché (toujours v2)", linkTarget(path.join(deployRoot, "current")) === v2);
+
+  // --- 9. Tag contenant un « / » (ex. release/v1) : refus net (revue Codex PR #38) ---
+  execFileSync("git", ["-C", repo, "tag", "release/v1"], { encoding: "utf8" });
+  r = deploy(["--tag", "release/v1"], env);
+  check("tag à slash : refus", r.code !== 0);
+  check("tag à slash : message explicite", r.out.includes("non supporté"));
+  check("tag à slash : aucun dossier imbriqué créé", !fs.existsSync(path.join(deployRoot, "release")));
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

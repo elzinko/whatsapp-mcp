@@ -42,6 +42,14 @@ ROOT="$(cd "$HERE/.." && pwd -P)"
 
 # ── 2. État hors du code ─────────────────────────────────────────────────────
 STATE_ROOT="${WHATSAPP_MCP_STATE_ROOT:-$HOME/.config/whatsapp-mcp}"
+mkdir -p "$STATE_ROOT"
+# Config persistante HORS de l'archive (revue Codex PR #38). git archive n'emporte pas
+# .env (gitignoré) : sans ça, la version figée perd les réglages non-chemin et retombe
+# aux défauts (WHATSAPP_PROFILE vide → un install profilé cesse de servir ses canaux ;
+# WHATSAPP_PERSIST / _MAX_MESSAGES / _SESSION_TTL_MS / _DEVICE_NAME réinitialisés). Un
+# fichier config.env dans la racine d'état les fournit. Chargé AVANT les défauts d'état,
+# donc il peut au besoin surcharger un chemin aussi.
+if [[ -f "$STATE_ROOT/config.env" ]]; then set -a; . "$STATE_ROOT/config.env"; set +a; fi
 # Miroir des chemins résolus dans src/config.js. Un chemin ABSOLU y sort déjà
 # l'état du checkout (path.resolve ignore projectRoot si le 2ᵉ arg est absolu).
 export WHATSAPP_AUTH_DIR="${WHATSAPP_AUTH_DIR:-$STATE_ROOT/auth}"
@@ -52,7 +60,6 @@ export WHATSAPP_ALLOWLIST_FILE="${WHATSAPP_ALLOWLIST_FILE:-$STATE_ROOT/allowlist
 export WHATSAPP_PROFILES_FILE="${WHATSAPP_PROFILES_FILE:-$STATE_ROOT/profiles.json}"
 export WHATSAPP_STRONG_AUTH_FILE="${WHATSAPP_STRONG_AUTH_FILE:-$STATE_ROOT/strong-auth.json}"
 export WHATSAPP_SESSIONS_DIR="${WHATSAPP_SESSIONS_DIR:-$STATE_ROOT/sessions}"
-mkdir -p "$STATE_ROOT"
 
 # ── 3. node stable puis exec ─────────────────────────────────────────────────
 # Même liste que STABLE_NODE_CANDIDATES dans src/setup.js — garder les deux

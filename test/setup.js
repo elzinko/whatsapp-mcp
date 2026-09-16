@@ -10,6 +10,7 @@ import {
   currentShimPath,
   devShimPath,
   devStateRoot,
+  deployedStateRoot,
   deployedVersion,
   desktopRunningFrom,
 } from "../src/setup.js";
@@ -118,6 +119,14 @@ check(
 check(
   "devStateRoot : distinct de la stable (~/.config/whatsapp-mcp-dev)",
   devStateRoot("/Users/test") === "/Users/test/.config/whatsapp-mcp-dev"
+);
+check(
+  "deployedStateRoot : défaut ~/.config/whatsapp-mcp",
+  deployedStateRoot({}, "/Users/test") === "/Users/test/.config/whatsapp-mcp"
+);
+check(
+  "deployedStateRoot : WHATSAPP_MCP_STATE_ROOT l'emporte",
+  deployedStateRoot({ WHATSAPP_MCP_STATE_ROOT: "/tmp/s" }, "/Users/test") === "/tmp/s"
 );
 
 // --- deployedVersion (readFileSync injecté, aucun accès disque) ---

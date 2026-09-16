@@ -27,6 +27,7 @@ set -euo pipefail
 
 REPO_ROOT="${WHATSAPP_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEPLOY_ROOT="${WHATSAPP_DEPLOY_ROOT:-$HOME/.local/share/whatsapp-mcp}"
+DEFAULT_DEPLOY_ROOT="$HOME/.local/share/whatsapp-mcp"
 CURRENT_LINK="$DEPLOY_ROOT/current"
 # « previous » — la version que current pointait AVANT la dernière bascule. Posé à
 # chaque bascule (déploiement, rollback, revert) : c'est le socle de « --revert ».
@@ -92,11 +93,16 @@ point_current_at() {
 }
 
 human_gesture() {
+  # Porte WHATSAPP_DEPLOY_ROOT dans la commande imprimée si la racine n'est pas la valeur
+  # par défaut (revue Codex PR #38) : sinon install-client recompute la racine par défaut et
+  # refuse, faute de shim là-bas — le workflow racine-custom ne pourrait pas aboutir.
+  local env_prefix=""
+  [[ "$DEPLOY_ROOT" != "$DEFAULT_DEPLOY_ROOT" ]] && env_prefix="WHATSAPP_DEPLOY_ROOT=\"$DEPLOY_ROOT\" "
   cat <<EOF
 
 ${B}Il reste un geste — à toi${N} (le serveur ne configure pas le client, ADR-0005) :
 
-  cd "$CURRENT_LINK" && npm run install:client
+  cd "$CURRENT_LINK" && ${env_prefix}npm run install:client
   # puis quitte complètement Claude Desktop (Cmd-Q) et relance-le.
 
 Ensuite, dans whatsapp_status, la version servie doit être « $(current_version) »
@@ -182,11 +188,14 @@ if [[ "$MODE" == "dev" ]]; then
   mv "$tmp" "$DEVSLOT"
   ok "rail dev figé : $DEVSLOT"
   ok "current INCHANGÉ : $(current_version)"
+  # Même précaution que la stable : porte la racine custom dans la commande (revue Codex PR #38).
+  dev_env_prefix=""
+  [[ "$DEPLOY_ROOT" != "$DEFAULT_DEPLOY_ROOT" ]] && dev_env_prefix="WHATSAPP_DEPLOY_ROOT=\"$DEPLOY_ROOT\" "
   cat <<EOF
 
 ${B}Il reste un geste — à toi${N} (rail dev, en parallèle de la stable) :
 
-  cd "$DEVSLOT" && npm run install:client:dev
+  cd "$DEVSLOT" && ${dev_env_prefix}npm run install:client:dev
   # branche le connecteur « whatsapp-feat » (état séparé ~/.config/whatsapp-mcp-dev).
   # Quitte/relance Claude Desktop. La première fois, whatsapp-feat demandera SON
   # propre QR : c'est l'appairage séparé (phase 1 de l'ADR-0007), pour tourner en
@@ -219,6 +228,14 @@ else
   SOURCE_REF="HEAD"
   ok "version : $VERSION"
 fi
+
+# Le nom de version EST un nom de dossier : un « / » (tag imbriqué comme release/v1)
+# créerait une arborescence que `mv`, le `--list` à un niveau et le suivi basename de
+# current/previous ne gèrent pas (revue Codex PR #38). On refuse plutôt que d'encoder —
+# l'encodage casserait `--rollback <tag>` (le nom ne correspondrait plus au dossier).
+case "$VERSION" in
+  */*) die "nom de version « $VERSION » contient « / » (tag imbriqué type release/v1) — non supporté : retague sans slash" ;;
+esac
 
 TARGET="$DEPLOY_ROOT/$VERSION"
 

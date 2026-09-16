@@ -30,7 +30,8 @@ function check(label, cond) {
 const STUB = `import fs from "node:fs";
 const keys = ["WHATSAPP_AUTH_DIR","WHATSAPP_AUTH_LOCK","WHATSAPP_DATA_DIR",
   "WHATSAPP_SETTINGS_FILE","WHATSAPP_ALLOWLIST_FILE","WHATSAPP_PROFILES_FILE",
-  "WHATSAPP_STRONG_AUTH_FILE","WHATSAPP_SESSIONS_DIR"];
+  "WHATSAPP_STRONG_AUTH_FILE","WHATSAPP_SESSIONS_DIR",
+  "WHATSAPP_MAX_MESSAGES","WHATSAPP_PROFILE"];
 const env = {};
 for (const k of keys) env[k] = process.env[k];
 process.stdout.write(JSON.stringify({ entry: process.argv[1], env }));
@@ -83,6 +84,14 @@ try {
   const r2 = runShim(current, { WHATSAPP_MCP_STATE_ROOT: stateRoot, WHATSAPP_AUTH_DIR: forcedAuth });
   check("WHATSAPP_AUTH_DIR explicite l'emporte sur le défaut", r2.env.WHATSAPP_AUTH_DIR === forcedAuth);
   check("les autres chemins restent sous la racine d'état", r2.env.WHATSAPP_DATA_DIR.endsWith("/state/data"));
+
+  // --- 4. config.env dans la racine d'état : réglages persistants chargés (revue Codex PR #38) ---
+  const stateRoot2 = path.join(tmp, "state2");
+  fs.mkdirSync(stateRoot2, { recursive: true });
+  fs.writeFileSync(path.join(stateRoot2, "config.env"), "WHATSAPP_MAX_MESSAGES=123\nWHATSAPP_PROFILE=famille\n");
+  const r3 = runShim(current, { WHATSAPP_MCP_STATE_ROOT: stateRoot2 });
+  check("config.env chargé : WHATSAPP_MAX_MESSAGES=123", r3.env.WHATSAPP_MAX_MESSAGES === "123");
+  check("config.env chargé : WHATSAPP_PROFILE=famille", r3.env.WHATSAPP_PROFILE === "famille");
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
