@@ -96,3 +96,27 @@ Le démon **peut** exposer un **admin de monitoring uniquement**, calqué sur ce
 google-mcp-multi-account (console web locale, journal d'audit — **aucun** pouvoir de config ni de
 contrôle). L'authentification / autorisation / accès vivent dans le serveur ; l'admin ne fait
 que *regarder*.
+
+### Cadrage PO (2026-09-16) — une connexion pour tous, accès par session
+
+Formulation du PO, qui **recadre** l'épic sans en changer le fond :
+
+- **Une seule connexion WhatsApp pour tout le monde.** Le démon la tient ; le chat, Cowork et
+  Code sont des frontends qui lui parlent. Ils **tournent toujours**, même sans appairage. Donc
+  l'« Échec / Connection closed » observé le 2026-09-16 sur les surfaces secondaires (le verrou
+  [fiche 0009](done/0009-verrou-exclusif-auth.md) qui refuse un 2ᵉ process sur le même appairage)
+  **disparaît** : plus personne ne se bat pour la session.
+- **Deux phases distinctes, dans l'ordre :**
+  1. **Appairage initial** — une fois, sur la machine, geste humain. Le MCP le **propose**
+     (élicitation / code / repli terminal) : fiche dédiée
+     [20260916130039008](20260916130039008_appairage-whatsapp-guide.md), **indépendante** du démon.
+  2. **Accès par session** — par personne/groupe, borné dans le temps, par élicitation avec
+     **authentification forte systématique** ([ADR-0003](../docs/adr/0003-consentement-par-presence-touch-id.md)).
+     Déjà livré : [fiche 20260902223310499](done/20260902223310499_droits-par-session-jeton-porte.md).
+- **Durée des accès** : aujourd'hui TTL **fixe** (8 h par défaut). « Liée à la durée de vie de la
+  session LLM » est la variante plus dure — le MCP ne sait pas toujours quand une session finit.
+  À concevoir en s'**alignant** sur le travail « autorisation par session sans admin » en cours sur
+  `google-mcp-multi-account`, pas en réinventant.
+
+Ce cadrage ne change pas les critères d'acceptation ci-dessus ; il confirme la direction et
+rattache la fiche d'appairage guidé.

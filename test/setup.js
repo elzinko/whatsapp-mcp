@@ -6,6 +6,13 @@ import {
   resolveStableNode,
   mergeMcpServer,
   desktopConfigPath,
+  deployRoot,
+  currentShimPath,
+  devShimPath,
+  devStateRoot,
+  deployedStateRoot,
+  deployedVersion,
+  desktopRunningFrom,
 } from "../src/setup.js";
 
 let failed = false;
@@ -85,6 +92,63 @@ check(
     "/Library/Application Support/Claude/claude_desktop_config.json"
   )
 );
+
+// --- deployRoot / currentShimPath (ADR-0007) ---
+check(
+  "deployRoot : défaut ~/.local/share/whatsapp-mcp",
+  deployRoot({}, "/Users/test") === "/Users/test/.local/share/whatsapp-mcp"
+);
+check(
+  "deployRoot : WHATSAPP_DEPLOY_ROOT l'emporte",
+  deployRoot({ WHATSAPP_DEPLOY_ROOT: "/tmp/dep" }, "/Users/test") === "/tmp/dep"
+);
+check(
+  "currentShimPath : pointe current/bin/whatsapp-mcp sous la racine",
+  currentShimPath({}, "/Users/test") ===
+    "/Users/test/.local/share/whatsapp-mcp/current/bin/whatsapp-mcp"
+);
+check(
+  "currentShimPath : suit l'override de racine",
+  currentShimPath({ WHATSAPP_DEPLOY_ROOT: "/tmp/dep" }, "/Users/test") ===
+    "/tmp/dep/current/bin/whatsapp-mcp"
+);
+check(
+  "devShimPath : slot dev sous la racine",
+  devShimPath({}, "/Users/test") === "/Users/test/.local/share/whatsapp-mcp/dev/bin/whatsapp-mcp"
+);
+check(
+  "devStateRoot : distinct de la stable (~/.config/whatsapp-mcp-dev)",
+  devStateRoot("/Users/test") === "/Users/test/.config/whatsapp-mcp-dev"
+);
+check(
+  "deployedStateRoot : défaut ~/.config/whatsapp-mcp",
+  deployedStateRoot({}, "/Users/test") === "/Users/test/.config/whatsapp-mcp"
+);
+check(
+  "deployedStateRoot : WHATSAPP_MCP_STATE_ROOT l'emporte",
+  deployedStateRoot({ WHATSAPP_MCP_STATE_ROOT: "/tmp/s" }, "/Users/test") === "/tmp/s"
+);
+
+// --- deployedVersion (readFileSync injecté, aucun accès disque) ---
+check("deployedVersion : lit le fichier VERSION", deployedVersion("/x", () => "de985f3\n") === "de985f3");
+check("deployedVersion : dev@<sha> préservé", deployedVersion("/x", () => "dev@abc1234\n") === "dev@abc1234");
+check("deployedVersion : VERSION absent -> 'dev'", deployedVersion("/x", () => { throw new Error("ENOENT"); }) === "dev");
+check("deployedVersion : VERSION vide -> 'dev'", deployedVersion("/x", () => "  \n") === "dev");
+
+// --- desktopRunningFrom (le bug du 2026-09-12 : pgrep -x Claude était aveugle) ---
+check(
+  "desktop détecté par son binaire principal (chemin complet)",
+  desktopRunningFrom("/usr/sbin/cfprefsd\n/Applications/Claude.app/Contents/MacOS/Claude\n/bin/zsh") === true
+);
+check(
+  "claude-code (CLI, 'claude' minuscule) n'est PAS pris pour Desktop",
+  desktopRunningFrom("/Users/x/Library/Application Support/Claude/claude-code/2.1.266/claude.app/Contents/MacOS/claude") === false
+);
+check(
+  "helpers seuls / aucun Claude -> non détecté",
+  desktopRunningFrom("/Applications/Claude.app/Contents/Helpers/disclaimer\n/bin/zsh") === false
+);
+check("sortie vide -> non détecté", desktopRunningFrom("") === false);
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
 process.exit(failed ? 1 : 0);

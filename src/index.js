@@ -263,6 +263,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         sessions.purgeExpired();
         const resolved = args.session ? sessions.resolve(args.session) : null;
         return ok({
+          // Quelle build répond : « de985f3 » = version déployée figée, « dev » = lancée
+          // depuis le checkout (ADR-0007). C'est le repère pour vérifier après un deploy.
+          version: config.deployedVersion,
           ...wa.status(),
           grantConsent,
           session: resolved

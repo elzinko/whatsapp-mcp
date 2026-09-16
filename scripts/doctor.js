@@ -4,9 +4,15 @@
 // CLI autonome (pas le serveur MCP) : stdout est libre pour le rapport.
 
 import fs from "node:fs";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { config } from "../src/config.js";
-import { nodeVersionOk, resolveStableNode, desktopConfigPath } from "../src/setup.js";
+import {
+  nodeVersionOk,
+  resolveStableNode,
+  desktopConfigPath,
+  currentShimPath,
+  deployedStateRoot,
+} from "../src/setup.js";
 
 const ok = (m) => console.log(`✅ ${m}`);
 const warn = (m) => console.log(`⚠️  ${m}`);
@@ -27,8 +33,11 @@ try {
   const raw = fs.readFileSync(desktopPath, "utf8");
   try {
     const cfg = JSON.parse(raw);
-    if (cfg?.mcpServers?.["whatsapp-mcp"]) ok("Claude Desktop : whatsapp-mcp branché");
-    else warn("Claude Desktop : whatsapp-mcp ABSENT de mcpServers → « npm run install:client »");
+    const entry = cfg?.mcpServers?.["whatsapp-mcp"];
+    const shim = currentShimPath();
+    if (!entry) warn("Claude Desktop : whatsapp-mcp ABSENT de mcpServers → « npm run install:client »");
+    else if (entry.command === shim) ok("Claude Desktop : whatsapp-mcp branché sur la version déployée (current)");
+    else warn(`Claude Desktop : branché mais PAS sur le shim déployé (command: ${entry.command}) → « npm run install:client » (sinon Desktop relance ton checkout)`);
   } catch {
     warn(`Claude Desktop : config présente mais JSON illisible (${desktopPath})`);
   }
@@ -43,20 +52,25 @@ try {
   });
   ok("Claude Code : whatsapp-mcp branché");
 } catch {
-  info("Claude Code : non détecté (ou CLI `claude` absente). Pour brancher :");
-  info(`  claude mcp add whatsapp-mcp -- ${stable.path} ${config.projectRoot}/src/index.js`);
+  info("Claude Code : non détecté (ou CLI `claude` absente). Pour brancher la version déployée :");
+  info(`  claude mcp add whatsapp-mcp -- ${currentShimPath()}`);
 }
 
-// 4. Session WhatsApp appairée ?
+// 4. Session WhatsApp appairée ? — sous la racine d'état DÉPLOYÉE (~/.config/whatsapp-mcp),
+// PAS le checkout où doctor tourne : le serveur déployé n'utilise jamais l'auth du checkout
+// (revue Codex PR #38).
+const stateRoot = deployedStateRoot();
+const deployedAuth = path.join(stateRoot, "auth");
 try {
-  if (fs.readdirSync(config.authDir).length > 0) ok(`auth/ présent (appairé) : ${config.authDir}`);
-  else warn(`auth/ vide — lance « npm start » et scanne le QR : ${config.authDir}`);
+  if (fs.readdirSync(deployedAuth).length > 0) ok(`auth/ présent (appairé) : ${deployedAuth}`);
+  else warn(`auth/ vide — appaire la version déployée (QR au 1er lancement) : ${deployedAuth}`);
 } catch {
-  warn(`auth/ absent — lance « npm start » et scanne le QR : ${config.authDir}`);
+  warn(`auth/ absent — déploie (« npm run deploy ») puis appaire : ${deployedAuth}`);
 }
 
-// 5. Plafond
-if (fs.existsSync(config.allowlistFile)) ok(`plafond présent : ${config.allowlistFile}`);
-else info(`plafond ${config.allowlistFile} absent (généré au 1er démarrage)`);
+// 5. Plafond (sous la racine d'état déployée)
+const deployedAllowlist = path.join(stateRoot, "allowlist.json");
+if (fs.existsSync(deployedAllowlist)) ok(`plafond présent : ${deployedAllowlist}`);
+else info(`plafond ${deployedAllowlist} absent (généré au 1er démarrage)`);
 
 console.log("\n(doctor ne modifie rien — pour configurer : npm run install:client)");

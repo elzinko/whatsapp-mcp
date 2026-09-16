@@ -15,8 +15,13 @@
     "list-groups": "node scripts/list-groups.js",
     "doctor": "node scripts/doctor.js",
     "install:client": "node scripts/install-client.js",
+    "install:client:dev": "node scripts/install-client.js --dev",
+    "deploy": "bash scripts/deploy-local.sh",
+    "deploy:dev": "bash scripts/deploy-local.sh --dev",
+    "deploy:list": "bash scripts/deploy-local.sh --list",
+    "deploy:revert": "bash scripts/deploy-local.sh --revert",
     "sessions": "node scripts/sessions.js",
-    "test": "node test/reconnect-plan.js && node test/store-persistence.js && node test/grants.js && node test/consent-provenance.js && node test/allowlist.js && node test/profiles.js && node test/elicitation.js && node test/touchid.js && node test/strongauth.js && node test/consent-strongauth.js && node test/setup.js && node test/sessions.js && node test/mcp-smoke.js && node test/help.js && node test/recent-messages.js && node test/authlock.js",
+    "test": "node test/reconnect-plan.js && node test/store-persistence.js && node test/grants.js && node test/consent-provenance.js && node test/allowlist.js && node test/profiles.js && node test/elicitation.js && node test/touchid.js && node test/strongauth.js && node test/consent-strongauth.js && node test/setup.js && node test/sessions.js && node test/mcp-smoke.js && node test/help.js && node test/recent-messages.js && node test/authlock.js && node test/deploy-shim.js && node test/deploy-local.js",
     "test:setup": "node test/setup.js",
     "test:authlock": "node test/authlock.js",
     "test:allowlist": "node test/allowlist.js",
@@ -31,7 +36,9 @@
     "test:mcp": "node test/mcp-smoke.js",
     "test:help": "node test/help.js",
     "test:reconnect": "node test/reconnect-plan.js",
-    "test:recent": "node test/recent-messages.js"
+    "test:recent": "node test/recent-messages.js",
+    "test:deploy-shim": "node test/deploy-shim.js",
+    "test:deploy-local": "node test/deploy-local.js"
   },
   "engines": {
     "node": ">=20"
