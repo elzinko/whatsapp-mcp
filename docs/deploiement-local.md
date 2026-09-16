@@ -51,6 +51,41 @@ Puis quitte complètement Claude Desktop (Cmd-Q) et relance-le. Le connecteur re
 `whatsapp-mcp` d'une version à l'autre — sinon Claude croit à un nouveau serveur et
 réinitialise les permissions d'outils.
 
+**Racine personnalisée** : `WHATSAPP_DEPLOY_ROOT=/chemin npm run deploy` déploie ailleurs
+que `~/.local/share/whatsapp-mcp`. La commande d'install que `deploy` affiche **reporte
+automatiquement** cette racine — recopie-la telle quelle.
+
+## Migration initiale de l'état (une fois, si tu utilisais déjà le checkout)
+
+Le déploiement range l'état sous `~/.config/whatsapp-mcp/`. Si tu avais **déjà** appairé et
+accordé des accès en lançant le serveur depuis le checkout, cet état vit encore dans ton dépôt
+(`auth/`, `settings.json`, `allowlist.json`, `profiles.json`, `strong-auth.json`, `sessions/`).
+La **première** bascule ne le transporte pas : le serveur déployé démarrerait vierge (QR
+redemandé, grants perdus) tant que tu ne l'as pas importé **une fois**.
+
+Serveur arrêté (Desktop quitté), depuis ton checkout :
+
+```bash
+mkdir -p ~/.config/whatsapp-mcp
+cp -a auth ~/.config/whatsapp-mcp/ 2>/dev/null || true
+for f in settings.json allowlist.json profiles.json strong-auth.json; do
+  [ -e "$f" ] && cp -a "$f" ~/.config/whatsapp-mcp/
+done
+cp -a sessions ~/.config/whatsapp-mcp/ 2>/dev/null || true
+```
+
+Après cette copie, l'appairage et les grants sont sous `~/.config/whatsapp-mcp/` — et **y
+restent** : les mises à jour et rollbacks n'y touchent plus.
+
+## Réglages persistants (`config.env`)
+
+`git archive` n'emporte **pas** ton `.env` (gitignoré), donc la version figée retombe aux
+réglages par défaut. Pour fixer des réglages **non-chemin** — `WHATSAPP_PROFILE`,
+`WHATSAPP_PERSIST`, `WHATSAPP_MAX_MESSAGES`, `WHATSAPP_SESSION_TTL_MS`, `WHATSAPP_DEVICE_NAME` —
+pose-les dans `~/.config/whatsapp-mcp/config.env` (une ligne `CLÉ=valeur` par réglage). Le shim
+le charge à chaque lancement, quelle que soit la version servie. Sans lui, un install **profilé**
+cesserait de servir ses canaux (profil vidé).
+
 ## Revenir en arrière
 
 ```bash
@@ -60,8 +95,9 @@ npm run deploy:revert   # current → previous (le retour le plus fréquent)
 bash scripts/deploy-local.sh --rollback <version>
 ```
 
-L'appairage et les grants vivent sous `~/.config/whatsapp-mcp/` : **ils survivent** à une
-bascule, à un update et à un rollback. Revenir en arrière ne te fait rien perdre.
+Une fois l'état sous `~/.config/whatsapp-mcp/` (voir la migration ci-dessus), l'appairage et
+les grants **survivent** à une bascule, à un update et à un rollback : revenir en arrière ne te
+fait rien perdre.
 
 ## Tester une version de dev **en parallèle** de la stable
 
@@ -99,4 +135,6 @@ appairage** : au premier lancement, `whatsapp-feat` affichera **son propre QR** 
   Aujourd'hui on fige depuis le checkout (`npm run deploy`). C'est un ajout ultérieur.
 - **Fichiers non suivis** : `deploy:dev` capture les fichiers *suivis* modifiés, pas les
   nouveaux fichiers jamais `git add`. Ajoute-les pour les inclure dans le rail dev.
+- **Noms de version** : un tag contenant un « / » (ex. `release/v1`) n'est pas supporté — le
+  nom de version sert de nom de dossier. Retague sans slash.
 - **Multi-simultané propre sur un seul appairage** = phase 2 (démon, fiche 0005).
