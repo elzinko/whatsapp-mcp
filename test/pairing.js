@@ -17,6 +17,7 @@ import {
   buildPairingCodeMessage,
   buildGuidedPairingRefusal,
   buildPairingFlow,
+  attachQrArt,
 } from "../src/pairing.js";
 
 let failed = false;
@@ -174,6 +175,29 @@ try {
     });
     const res = await flow();
     check("élicitation indisponible -> repli voie terminal", res.route === "terminal" && res.message.includes("npm run pair"));
+  }
+
+  // --- 3) attachQrArt (fiche 20260917180706311) : expose le QR ASCII dans la réponse
+  // d'outil `whatsapp_pair` pour la voie QR / repli terminal — jamais pour la voie 1
+  // (élicitation + code obtenu), où le code est déjà dans le message.
+  {
+    const terminalResult = { route: "terminal", message: "procédure terminal…" };
+    const withQr = attachQrArt(terminalResult, "QR-ASCII-ART");
+    check("voie terminal + QR dispo -> qrArt posé dans la réponse", withQr.qrArt === "QR-ASCII-ART");
+    check("voie terminal + QR dispo -> le reste du résultat est conservé", withQr.message === "procédure terminal…");
+    check("voie terminal + QR dispo -> pas de hint d'attente", withQr.qrHint === undefined);
+
+    const withoutQr = attachQrArt(terminalResult, null);
+    check("voie terminal, QR pas encore dispo -> qrArt null", withoutQr.qrArt === null);
+    check(
+      "voie terminal, QR pas encore dispo -> hint « réessaie dans un instant »",
+      /réessaie/i.test(withoutQr.qrHint || "")
+    );
+
+    const elicitationResult = { route: "elicitation", pairingCode: "ABCD-1234", message: "Code : ABCD-1234" };
+    const untouched = attachQrArt(elicitationResult, "QR-ASCII-ART");
+    check("voie élicitation (code obtenu) -> jamais de qrArt ajouté", !("qrArt" in untouched));
+    check("voie élicitation (code obtenu) -> résultat inchangé", untouched === elicitationResult || untouched.pairingCode === "ABCD-1234");
   }
 } catch (e) {
   console.error("Erreur test:", e);

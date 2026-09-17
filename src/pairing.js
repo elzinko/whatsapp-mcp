@@ -113,3 +113,20 @@ export function buildPairingFlow({ isElicitationSupported, elicitInput, requestP
     return { route: "elicitation", pairingCode, message: buildPairingCodeMessage(pairingCode) };
   };
 }
+
+// Attache le QR ASCII à un résultat de buildPairingFlow, pour que `whatsapp_pair`
+// (fiche 20260917180706311) réponde avec de quoi appairer SANS terminal :
+//  - voie 1 (élicitation, code obtenu) : rien à ajouter, le code est déjà dans le message ;
+//  - voie terminal (pas d'élicitation, ou élicitation en échec) : le QR ASCII (rendu par
+//    WhatsAppClient.currentQrArt(), depuis this.lastQR) s'ajoute à la procédure terminal —
+//    absent (connexion pas encore montée) -> un hint d'attente plutôt qu'un silence.
+// `qrArt` est fourni par l'appelant (jamais calculé ici) : cette fonction reste PURE,
+// testable sans WhatsAppClient ni qrcode-terminal.
+export function attachQrArt(result, qrArt) {
+  if (result.route !== "terminal") return result;
+  return {
+    ...result,
+    qrArt: qrArt || null,
+    qrHint: qrArt ? undefined : "QR pas encore disponible : réessaie dans un instant, la connexion se monte.",
+  };
+}

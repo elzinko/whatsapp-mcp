@@ -146,6 +146,10 @@ export class WhatsAppClient {
     // Code d'appairage (voie 1, fiche 20260916130039008) : alternative textuelle au QR,
     // jouable en élicitation. null tant qu'aucun n'a été demandé.
     this.pairingCode = null;
+    // Numéro mémorisé par start(phoneNumber) (fiche 20260917180706311) : le code n'est
+    // demandé à Baileys QU'AU MOMENT de l'event `qr` (WS prêt), jamais juste après
+    // makeWASocket (trop tôt -> "Connection Closed", bug confirmé en réel).
+    this._pairPhoneNumber = null;
     this.startedAt = Date.now();
     this.stores = new Map(); // jid -> MessageStore (un tampon + une archive par canal)
     this.knownGroups = new Map(); // jid -> nom, snapshot du dernier fetch
@@ -191,6 +195,21 @@ export class WhatsAppClient {
     this.pairingCode = code;
     log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
     return code;
+  }
+
+  // Rend `this.lastQR` en art ASCII (via qrcode-terminal), pour l'exposer dans la RÉPONSE
+  // de l'outil MCP `whatsapp_pair` (fiche 20260917180706311) — jamais sur stdout, réservé
+  // au JSON-RPC (voir en-tête du fichier). null tant qu'aucun QR n'est encore disponible
+  // (connexion pas encore montée jusqu'à l'event `qr`).
+  currentQrArt() {
+    if (!this.lastQR) return null;
+    let art = null;
+    // qrcode.generate(str, opts, cb) appelle cb de façon SYNCHRONE : on capture la
+    // string produite dans cette variable fermée, pas de promesse nécessaire.
+    qrcode.generate(this.lastQR, { small: true }, (output) => {
+      art = output;
+    });
+    return art;
   }
 
   // Tampon d'un canal, créé à la demande et rattaché à son archive JSONL.
@@ -374,16 +393,13 @@ export class WhatsAppClient {
     });
     this.sock = sock;
 
-    // Voie 1 (fiche 20260916130039008) : un numéro fourni ET un compte pas encore
-    // enregistré -> demande un code d'appairage plutôt que d'attendre le QR. Un compte
-    // déjà enregistré ignore le numéro (rien à ré-appairer).
-    if (phoneNumber && !sock.authState?.creds?.registered) {
-      try {
-        await this.requestPairingCode(phoneNumber);
-      } catch (e) {
-        log("Impossible d'obtenir un code d'appairage :", e?.message);
-      }
-    }
+    // Voie 1 (fiche 20260916130039008, timing réparé fiche 20260917180706311) : un
+    // numéro fourni -> mémorisé pour être joué au bon moment. PAS ICI : juste après
+    // makeWASocket, le WebSocket n'est pas encore prêt (Baileys exige d'attendre l'event
+    // `connection.update` avec `qr`) — l'appeler ici a provoqué en réel un
+    // « Impossible d'obtenir un code d'appairage : Connection Closed ». Le déclenchement
+    // réel se fait dans le handler `connection.update`, branche `qr`, plus bas.
+    this._pairPhoneNumber = phoneNumber || null;
 
     // Une écriture de creds qui échoue (ex: dossier auth supprimé sous nos pieds par
     // un autre process) ne doit JAMAIS crasher le serveur : rejet capté et journalisé.
@@ -405,6 +421,18 @@ export class WhatsAppClient {
         log("  Android : WhatsApp > ⋮ > Appareils connectés > Connecter un appareil");
         // qrcode-terminal écrit par défaut sur stdout -> on redirige vers stderr
         qrcode.generate(qr, { small: true }, (art) => process.stderr.write(art + "\n"));
+
+        // Voie 1 (timing réparé, fiche 20260917180706311) : le WebSocket est enfin PRÊT
+        // (Baileys vient d'émettre `qr`) — c'est le bon moment pour demander le code,
+        // jamais avant. Une seule fois (!this.pairingCode), et seulement si un numéro a
+        // été fourni pour un compte pas encore enregistré (rien à ré-appairer sinon).
+        if (this._pairPhoneNumber && !sock.authState?.creds?.registered && !this.pairingCode) {
+          try {
+            await this.requestPairingCode(this._pairPhoneNumber);
+          } catch (e) {
+            log("Impossible d'obtenir un code d'appairage :", e?.message);
+          }
+        }
       }
       if (connection === "connecting") {
         this.state = "connecting";
