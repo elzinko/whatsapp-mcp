@@ -49,6 +49,7 @@ try {
   const names = tools.map((t) => t.name);
   console.log("Outils exposés :", names.join(", "));
   for (const expected of [
+    "whatsapp_pair",
     "whatsapp_status",
     "list_groups",
     "grant_channel",
@@ -70,31 +71,54 @@ try {
   check("status.readOnly === true", status.readOnly === true);
   check("aucun canal autorisé au départ", Array.isArray(status.grantedChannels) && status.grantedChannels.length === 0);
 
-  // Rupture assumée (fiche 20260902223310499) : get_recent_messages EXIGE désormais
-  // une session ('session_open'), même quand un canal est autorisé. Sans jeton, le
-  // refus guide vers 'session_open' plutôt que vers 'grant_channel'. Voir
-  // test/sessions.js pour le reste du cycle de vie des sessions.
+  // Fiche 20260916130039008 (appairage guidé) : ce client n'a pas encore appairé
+  // WhatsApp (state reste "starting"/"qr" dans ce test). Un appel d'accès ne renvoie
+  // JAMAIS un simple « non connecté » : il guide. Ce client déclare capabilities: {}
+  // (pas d'élicitation) -> voie 2 (repli terminal), contenu assené (DoD ezk-pm) :
+  // la commande EXACTE 'npm run pair' ET la cible EXACTE ~/.config/whatsapp-mcp/auth.
   const recentRes = await client.callTool({
     name: "get_recent_messages",
     arguments: { limit: 5 },
   });
+  const recentText = recentRes.content?.[0]?.text || "";
   check(
-    "get_recent_messages sans session -> erreur explicite guidant vers session_open",
-    recentRes.isError === true && /session_open/.test(recentRes.content?.[0]?.text || "")
+    "get_recent_messages sans appairage -> chemin guidé (jamais 'non connecté' sec)",
+    recentRes.isError === true && !/^erreur\s*:\s*whatsapp non connecté/i.test(recentText)
+  );
+  check("get_recent_messages sans appairage -> commande EXACTE 'npm run pair'", recentText.includes("npm run pair"));
+  check(
+    "get_recent_messages sans appairage -> cible EXACTE ~/.config/whatsapp-mcp/auth",
+    recentText.includes("~/.config/whatsapp-mcp/auth")
   );
 
   // Nouveaux outils de la fiche 20260902223310499, présents dans l'inventaire.
   check("outil présent: session_open", names.includes("session_open"));
   check("outil présent: session_close", names.includes("session_close"));
 
-  // grant_channel sans connexion WhatsApp doit échouer proprement (pas de crash).
+  // grant_channel sans appairage WhatsApp doit échouer proprement (pas de crash),
+  // avec le même chemin guidé (jamais un simple « non connecté »).
   const grantRes = await client.callTool({
     name: "grant_channel",
     arguments: { channel: "0000000000000@g.us" },
   });
+  const grantText = grantRes.content?.[0]?.text || "";
+  check("grant_channel sans appairage -> chemin guidé", grantRes.isError === true);
+  check("grant_channel sans appairage -> commande EXACTE 'npm run pair'", grantText.includes("npm run pair"));
   check(
-    "grant_channel hors connexion -> erreur explicite",
-    grantRes.isError === true && /non connecté/i.test(grantRes.content?.[0]?.text || "")
+    "grant_channel sans appairage -> cible EXACTE ~/.config/whatsapp-mcp/auth",
+    grantText.includes("~/.config/whatsapp-mcp/auth")
+  );
+
+  // whatsapp_pair, appelé directement : ce client ne supporte pas l'élicitation ->
+  // voie 2 (repli terminal), même contenu assené.
+  const pairRes = await client.callTool({ name: "whatsapp_pair", arguments: {} });
+  check("whatsapp_pair sans élicitation -> pas d'erreur (juste une procédure)", pairRes.isError !== true);
+  const pairData = JSON.parse(pairRes.content?.[0]?.text || "{}");
+  check("whatsapp_pair sans élicitation -> route 'terminal'", pairData.route === "terminal");
+  check("whatsapp_pair sans élicitation -> commande EXACTE 'npm run pair'", pairData.message.includes("npm run pair"));
+  check(
+    "whatsapp_pair sans élicitation -> cible EXACTE ~/.config/whatsapp-mcp/auth",
+    pairData.message.includes("~/.config/whatsapp-mcp/auth")
   );
 } catch (e) {
   console.error("Test en échec:", e);

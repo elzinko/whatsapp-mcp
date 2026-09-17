@@ -5,8 +5,8 @@ type: feature
 priority: P1
 version:
 epic:
-status: idea
-ready:
+status: ready
+ready: 2026-09-17
 pr:
 created: 2026-09-16
 ---
@@ -58,9 +58,47 @@ donc il profite à toutes les surfaces. Reste fort-authentifié là où c'est pe
 
 ## Comment vérifier
 
-1. État vide → une session demande une lecture → le MCP **propose** l'appairage (élicitation ou procédure).
-2. Suivre la voie code : saisir le code sur le téléphone → `whatsapp_status` passe à `connected`.
-3. Rouvrir une session → connectée sans QR.
+Le mécanisme se teste en automatique ; le « dernier mètre » (le code tapé sur le téléphone)
+se valide à la main, comme le QR aujourd'hui.
+
+**Automatique (suite de tests) :**
+
+1. Sans appairage, un appel d'accès (`list_groups`, `get_recent_messages`, `session_open`)
+   renvoie un **chemin guidé** — jamais un simple « non connecté » : voie élicitation si le
+   client la supporte, sinon la procédure terminal exacte.
+2. Sélection de voie : capacité élicitation présente → voie 1 (code) ; absente → voie 2
+   (terminal). Testable par injection — le getter `clientSupportsElicitation` existe déjà
+   (`src/index.js:437`).
+3. Le repli terminal vise l'état partagé `~/.config/whatsapp-mcp/auth`, jamais un checkout.
+
+**Manuel (une fois, sur la machine) :**
+
+4. État vide → une session demande une lecture → le MCP **propose** l'appairage.
+5. Voie code : saisir le code sur le téléphone (WhatsApp > Appareils liés > Lier avec un
+   numéro) → `whatsapp_status` passe à `connected: true`.
+6. Rouvrir une session → connectée sans ré-appairage.
+
+## Faisabilité (confirmée 2026-09-17)
+
+Ancrée dans le code (exploration du 2026-09-17). Constructible sur l'existant :
+
+- **Code d'appairage sans QR : OUI.** Baileys `6.7.24` expose `sock.requestPairingCode(numéro)`,
+  appelé tant que le compte n'est pas enregistré. Point d'insertion : `WhatsAppClient.start()`,
+  à la création du socket (`src/whatsapp.js:321-352`), en amont de la branche QR. `start()`
+  devra recevoir le numéro (il n'en prend aucun aujourd'hui).
+- **Choix voie 1 / voie 2 : déjà là.** Le serveur détecte la capacité élicitation du client au
+  handshake (`src/index.js:437-442`). C'est le sélecteur, réutilisé tel quel.
+- **Formulaire de saisie : à créer.** L'élicitation existe (`server.elicitInput`, `src/consent.js`)
+  mais toujours avec un **schéma vide** (Accept/Decline seuls). La voie code a besoin du
+  **premier schéma non vide** (saisir le numéro), ou d'un message qui affiche le code à recopier.
+- **État partagé : acquis.** L'auth est persistée dans `~/.config/whatsapp-mcp/auth`
+  (`src/whatsapp.js:298`, chemin injecté par le shim).
+- **Nouvel outil `whatsapp_pair` + `npm run pair`** : à ajouter (pattern d'outil régulier dans
+  `src/index.js` ; repli terminal calqué sur `scripts/list-groups.js`).
+- **À trancher dans le sprint** : harmoniser le vocabulaire — l'état interne est `open`/`qr`/…
+  tandis que la fiche parle de `connected` (booléen dérivé). Exposer un statut clair et unique.
+- **Limite honnête** : l'appel `requestPairingCode` réel se teste par mock Baileys (à introduire)
+  ou par validation manuelle — le vrai appairage reste non-automatisable (ADR-0005, geste humain).
 
 ## Notes
 
@@ -71,7 +109,4 @@ donc il profite à toutes les surfaces. Reste fort-authentifié là où c'est pe
 - Fort-auth systématique sur les grants : [ADR-0003](../docs/adr/0003-consentement-par-presence-touch-id.md).
 - Aligner le vocabulaire et le flux avec le travail « autorisation par session sans admin » en
   cours sur `google-mcp-multi-account`.
-- Technique à confirmer : Baileys sait générer un **code d'appairage** (alternative au QR, via un
-  appel type `requestPairingCode(numéro)`) — c'est ce qui rend la voie élicitation possible. À
-  vérifier côté API avant de s'engager.
-- Priorité proposée **P1** (porte d'entrée de tout l'outil, indépendante du démon) — à confirmer par le PO.
+- **Priorité P1 confirmée par le PO (2026-09-17)** : porte d'entrée de tout l'outil, indépendante du démon.

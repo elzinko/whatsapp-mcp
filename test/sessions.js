@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
 
 import { SessionRegistry, DEFAULT_TTL_MS } from "../src/sessions.js";
 import { buildSessionConsent } from "../src/consent.js";
@@ -200,6 +201,16 @@ try {
     const strongAuthFile = path.join(tmpDir, "strong-auth.json");
     const sessionsDir = path.join(tmpDir, "sessions");
 
+    // Serveur "appairé" pour tester la couche SESSION : on sème des identifiants Baileys
+    // valides marqués registered:true. isRegistered() lit ces creds, PAS les grants (un
+    // logout 401 efface auth/ mais garde settings.json — revue Codex #40) : sans ces
+    // creds, la garde d'appairage guiderait vers l'appairage avant la logique de session.
+    const authDir = path.join(tmpDir, "auth");
+    fs.mkdirSync(authDir, { recursive: true });
+    const seededCreds = initAuthCreds();
+    seededCreds.registered = true;
+    fs.writeFileSync(path.join(authDir, "creds.json"), JSON.stringify(seededCreds, BufferJSON.replacer, 2));
+
     const CHAN_A = "111111111111111111@g.us";
     const CHAN_B = "222222222222222222@g.us";
     const CHAN_UNGRANTED = "333333333333333333@g.us"; // ni grant ni plafond
@@ -224,7 +235,7 @@ try {
         stderr: "ignore",
         env: {
           ...process.env,
-          WHATSAPP_AUTH_DIR: "./auth-test",
+          WHATSAPP_AUTH_DIR: authDir,
           WHATSAPP_SETTINGS_FILE: settingsFile,
           WHATSAPP_ALLOWLIST_FILE: allowlistFile,
           WHATSAPP_STRONG_AUTH_FILE: strongAuthFile,

@@ -19,10 +19,12 @@ import { Settings } from "./settings.js";
 import { Allowlist } from "./allowlist.js";
 import { Profiles } from "./profiles.js";
 import { buildConfirmGrant, buildGrantConsent, buildSessionConsent } from "./consent.js";
+import { buildGuidedPairingRefusal, buildPairingFlow } from "./pairing.js";
 import { readStrongAuthEnabled } from "./strongauth.js";
 import { checkPresence } from "./touchid.js";
 import { WhatsAppClient, log, toRecentMessage } from "./whatsapp.js";
 import { SessionRegistry } from "./sessions.js";
+import { deployedStateRoot } from "./setup.js";
 
 const settings = new Settings(config.settingsFile).load();
 // Le plafond (ADR-0002). Au tout premier démarrage, il est généré depuis les grants
@@ -101,6 +103,12 @@ const TOOLS = [
     name: "whatsapp_help",
     description:
       "Aide : ce qu'est ce serveur (LECTURE SEULE) et comment s'en servir — les 5 outils, le plafond (allowlist.json), le flux grant → lecture, et la note de sécurité. À appeler dès qu'on demande « c'est quoi ce MCP / comment je l'utilise ? ». Indirige vers le README pour le détail.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "whatsapp_pair",
+    description:
+      "Propose l'appairage WhatsApp quand rien n'est encore appairé (fiche appairage guidé). Si le client supporte l'élicitation, demande le numéro de téléphone puis affiche un code d'appairage à saisir sur le téléphone (WhatsApp > Appareils liés > Lier avec un numéro), sans QR. Sinon, renvoie la commande terminal exacte ('npm run pair') à lancer par un humain, qui écrit dans l'état partagé. Le serveur guide toujours, il ne s'appaire jamais lui-même.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -232,6 +240,21 @@ const TOOLS = [
   },
 ];
 
+// Racine d'état à PORTER dans le repli terminal d'appairage (voie 2, revue Codex #40) :
+// renseignée seulement si le connecteur demandeur n'est PAS sur la racine par défaut
+// (ex. rail dev whatsapp-feat -> ~/.config/whatsapp-mcp-dev). Sinon `npm run pair`, lancé
+// dans un autre shell, retomberait sur la prod. undefined = racine par défaut.
+const pairStateRoot = deployedStateRoot() === deployedStateRoot({}) ? undefined : deployedStateRoot();
+
+// « Rien n'est appairé » (fiche 20260916130039008) : le compte n'a PAS d'identifiants
+// WhatsApp enregistrés (creds.registered). Signal AUTORITAIRE, pas les grants — un logout
+// 401 efface auth/ mais conserve settings.json, donc un compte délié a grants>0 tout en
+// devant ré-appairer (revue Codex #40). En reconnexion réseau (registered=true, pas encore
+// « open »), registered reste vrai : on NE guide PAS, la reconnexion suffit.
+function nothingPairedYet() {
+  return !wa.isRegistered();
+}
+
 function ok(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
@@ -252,6 +275,23 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     switch (name) {
       case "whatsapp_help":
         return { content: [{ type: "text", text: HELP_TEXT }] };
+
+      case "whatsapp_pair": {
+        // Garde alignée sur les 4 outils d'accès (nothingPairedYet) : un grant persisté
+        // prouve un appairage passé, donc en reconnexion réseau on NE re-sollicite PAS
+        // le numéro (sinon on demande une donnée perso pour rien — revue P1).
+        if (!nothingPairedYet()) {
+          return ok({
+            route: "already-paired",
+            message: "WhatsApp est déjà appairé. Rien à faire.",
+          });
+        }
+        const result = await pairingFlow();
+        if (result.route === "declined") {
+          return fail(`Appairage refusé par l'humain (${result.reason}).`);
+        }
+        return ok(result);
+      }
 
       case "whatsapp_status": {
         const grantConsent = readStrongAuthEnabled(config.strongAuthFile)
@@ -281,6 +321,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "list_groups": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         const { groups, hiddenOutsideAllowlist, hiddenOutsideProfile } = await wa.listGroups();
         const resolvedSession = args.session ? sessions.resolve(args.session) : null;
         const inSession = resolvedSession ? new Set(resolvedSession.channels) : null;
@@ -308,12 +349,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "grant_channel":
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         return ok(await wa.grantChannel(args.channel));
 
       case "revoke_channel":
         return ok(wa.revokeChannel(args.channel));
 
       case "session_open": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         const requested = Array.isArray(args.channels) ? args.channels : [];
         if (requested.length === 0) return fail("Fournis au moins un canal ('channels').");
 
@@ -371,6 +414,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "get_recent_messages": {
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         if (!args.session) {
           return fail(
             "Aucune session : cet outil exige un jeton de session. Ouvre-en une avec " +
@@ -446,6 +490,17 @@ wa.confirmGrant = buildGrantConsent({
   isStrongAuthEnabled: () => readStrongAuthEnabled(config.strongAuthFile),
   checkPresence,
   elicitationConsent,
+  log,
+});
+
+// Flux d'appairage guidé (fiche 20260916130039008), outil `whatsapp_pair` : demande
+// le numéro par élicitation (voie 1) si le client le permet, sinon renvoie la
+// procédure terminal (voie 2). Ne s'appaire jamais lui-même (ADR-0005).
+const pairingFlow = buildPairingFlow({
+  isElicitationSupported: () => clientSupportsElicitation,
+  elicitInput: (params) => server.elicitInput(params),
+  requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
+  stateRoot: pairStateRoot,
   log,
 });
 
