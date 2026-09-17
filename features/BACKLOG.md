@@ -34,7 +34,10 @@
 
 | # | Titre | Type | Prio | Épic | Statut | PR |
 |---|-------|------|------|------|--------|----|
+| [20260917211902097](20260917211902097_demon-tient-whatsapp.md) | Le démon tient WhatsApp — un seul process, derrière une socket locale | feature | P2 | 0005 | 💡 idea |  |
+| [20260917211902225](20260917211902225_frontend-mcp-mince.md) | Le frontend MCP mince — parle au démon, plus jamais à WhatsApp | feature | P2 | 0005 | 💡 idea |  |
 | [0007](0007-elicitation-signee-touch-id.md) | Élicitation signée — consentement par authentification physique (Touch ID / Secure Enclave) | feature | P3 |  | 💡 idea |  |
 | [20260902223310640](20260902223310640_emballage-plugin-cowork-marketplace.md) | Emballage plugin Claude (marketplace elzinko) — skills + .mcp.json pour Cowork et Code | feature | P3 | 20260902223310355 | 💡 idea |  |
+| [20260917211902355](20260917211902355_admin-monitoring-lecture-seule.md) | Admin de monitoring — regarder le démon, sans aucun pouvoir | feature | P3 | 0005 | 💡 idea |  |
 
 > Livrées (`done/`) : [0003](done/0003-hygiene-locale-permissions-filevault.md), [0004](done/0004-profils-par-projet.md), [0008](done/0008-repli-sans-elicitation-fail-open.md), [0009](done/0009-verrou-exclusif-auth.md), [0010](done/0010-installer-doctor-cli.md), [0011](done/0011-outil-aide-mcp.md), [0012](done/0012-adr-serveur-ne-configure-pas-le-client.md), [0013](done/0013-garde-touchid-presence-grant.md), [20260902223310499](done/20260902223310499_droits-par-session-jeton-porte.md), [20260903085814506](done/20260903085814506_exposer-id-message-pour-ingestion.md), [20260911212530209](done/20260911212530209_deploiement-local-versionne.md), [20260916130039008](done/20260916130039008_appairage-whatsapp-guide.md).

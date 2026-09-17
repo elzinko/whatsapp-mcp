@@ -11,6 +11,13 @@ pr:
 created: 2026-07-18
 ---
 
+**En clair.** Aujourd'hui chaque client — Desktop, Cowork, chaque session Code — lance son
+propre serveur WhatsApp, et ils se battent pour l'unique connexion autorisée : le dernier gagne,
+les autres tombent (erreur 440). Cet épic met **un seul démon** qui tient WhatsApp, et des
+**frontends minces** que les clients lancent librement pour lui parler. Résultat visé : Desktop
+et N sessions Code en même temps, zéro guerre de sessions. C'est un **épic** : on ne le tire pas,
+on tire ses enfants (voir « Découpage » ci-dessous).
+
 ## Contexte / Problème
 
 Une session WhatsApp = un seul process vivant par dossier `auth/`. Aujourd'hui chaque
@@ -33,6 +40,37 @@ des scopes de frontend. L'élicitation reste dans le frontend (au plus près du 
 - [ ] La capture continue tant que le démon tourne, même sans client ouvert
 - [ ] Plafond et consentement inchangés (ADR-0002 respecté)
 - [ ] ADR dédié (cycle de vie du démon : lancement, supervision, arrêt)
+
+## Découpage en fiches tirables (grooming 2026-09-17)
+
+L'épic est découpé en trois enfants, dans cet ordre de construction. Chacun est une fiche
+autonome, groomée, prête pour le gate `ready` (elles naissent `idea` — le gate les promeut au
+moment de les tirer).
+
+1. **[20260917211902097](20260917211902097_demon-tient-whatsapp.md) — Le démon tient WhatsApp.**
+   Le socle. Sort Baileys, la capture, l'archive, le plafond et le registre de sessions des
+   clients vers un démon unique, qui expose une socket Unix locale (contrat NDJSON). Porte l'ADR
+   (cycle de vie + contrat + frontière de sécurité).
+2. **[20260917211902225](20260917211902225_frontend-mcp-mince.md) — Le frontend MCP mince.**
+   Réécrit le serveur stdio en client mince du démon ; l'élicitation / Touch ID reste au
+   frontend. Dépend de (1).
+3. **[20260917211902355](20260917211902355_admin-monitoring-lecture-seule.md) — Admin de
+   monitoring (lecture seule).** Console web locale + journal d'audit, aucun pouvoir de config ni
+   de contrôle. Dépend de (1) ; **optionnelle, en dernier**.
+
+**La décision d'architecture centrale** (à graver dans l'ADR de la fiche 1) : le secret de la
+socket borne *qui* parle au démon — des process locaux que l'humain a lancés. Il **n'authentifie
+personne**. Le geste humain (Touch ID, côté frontend) ouvre un périmètre ; le démon fait
+confiance à un frontend authentifié-par-secret. C'est de la **sûreté** (anti-process-parasite),
+pas de la **sécurité**, et ça doit être écrit tel quel. La vraie frontière reste le doigt + le
+plafond, comme partout dans ce projet.
+
+## Comment vérifier
+
+Épic clos quand les fiches **(1) démon** et **(2) frontend** sont livrées : la capture survit
+sans client, zéro 440 en multi-clients, Desktop + N sessions Code en parallèle. L'**admin (3)**
+peut suivre. Chaque enfant porte ses propres tests hermétiques (`npm test`) et son scénario
+manuel — voir sa fiche.
 
 ## Notes
 
