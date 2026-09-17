@@ -150,6 +150,10 @@ export class WhatsAppClient {
     // demandé à Baileys QU'AU MOMENT de l'event `qr` (WS prêt), jamais juste après
     // makeWASocket (trop tôt -> "Connection Closed", bug confirmé en réel).
     this._pairPhoneNumber = null;
+    // Drapeau anti double-appel de requestPairingCode (revue v2 P2) : posé SYNCHRONEMENT
+    // avant l'await dans le handler `qr`, car Baileys ré-émet `qr` périodiquement — sans
+    // lui, un 2e `qr` pendant que le 1er appel est en vol écraserait le code affiché.
+    this._pairCodeRequested = false;
     this.startedAt = Date.now();
     this.stores = new Map(); // jid -> MessageStore (un tampon + une archive par canal)
     this.knownGroups = new Map(); // jid -> nom, snapshot du dernier fetch
@@ -426,10 +430,17 @@ export class WhatsAppClient {
         // (Baileys vient d'émettre `qr`) — c'est le bon moment pour demander le code,
         // jamais avant. Une seule fois (!this.pairingCode), et seulement si un numéro a
         // été fourni pour un compte pas encore enregistré (rien à ré-appairer sinon).
-        if (this._pairPhoneNumber && !sock.authState?.creds?.registered && !this.pairingCode) {
+        if (
+          this._pairPhoneNumber &&
+          !sock.authState?.creds?.registered &&
+          !this.pairingCode &&
+          !this._pairCodeRequested
+        ) {
+          this._pairCodeRequested = true; // synchrone AVANT l'await : ferme la fenêtre de double-appel
           try {
             await this.requestPairingCode(this._pairPhoneNumber);
           } catch (e) {
+            this._pairCodeRequested = false; // échec -> réautoriser une tentative au prochain `qr`
             log("Impossible d'obtenir un code d'appairage :", e?.message);
           }
         }
