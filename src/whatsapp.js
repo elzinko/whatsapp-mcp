@@ -161,6 +161,22 @@ export class WhatsAppClient {
     return this.state === "open" && !!this.sock;
   }
 
+  // « Appairé » = identifiants WhatsApp enregistrés (creds.registered) — signal AUTORITAIRE.
+  // Lu sur le DISQUE (creds.json), pas sur le socket vivant, pour deux raisons :
+  //  1. disponible dès le boot, AVANT que start() ait créé le socket — sinon un compte
+  //     déjà appairé serait guidé vers l'appairage pendant la fenêtre de démarrage ;
+  //  2. un logout 401 EFFACE auth/ (donc creds.json absent = non appairé), tandis que les
+  //     grants (settings.json) SURVIVENT au logout et ne prouvent RIEN (revue Codex #40) —
+  //     ne jamais déduire l'appairage des grants.
+  isRegistered() {
+    try {
+      const raw = fs.readFileSync(path.join(this.config.authDir, "creds.json"), "utf8");
+      return JSON.parse(raw)?.registered === true;
+    } catch {
+      return false;
+    }
+  }
+
   // Demande un code d'appairage à Baileys pour le socket courant (voie 1, fiche
   // 20260916130039008) : alternative textuelle au QR, présentable en élicitation.
   // Appelable au démarrage (start(phoneNumber)) OU après coup, sur un socket déjà

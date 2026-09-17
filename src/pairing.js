@@ -12,14 +12,24 @@ export const PAIR_COMMAND = "npm run pair";
 // Cible d'état PARTAGÉ (ADR-0007) où l'appairage écrit — jamais un checkout.
 export const SHARED_AUTH_HINT = "~/.config/whatsapp-mcp/auth";
 
-// Voie 2 — repli terminal : la commande EXACTE à lancer, et où elle écrit.
-export function buildTerminalPairingMessage() {
+// Voie 2 — repli terminal. Deux pièges corrigés (revue Codex #40) :
+//  - le serveur MCP tient le verrou auth/ (fiche 0009) : `npm run pair` échouerait en
+//    ELOCKED tant qu'il tourne -> on dit d'ABORD d'arrêter le serveur ;
+//  - `npm run pair` résout sa racine d'état depuis SON shell : sans la racine du
+//    connecteur demandeur, un appairage depuis le rail dev toucherait la prod -> on PORTE
+//    la racine dans la commande quand elle n'est pas la racine par défaut.
+// `stateRoot` (optionnel) = racine d'état active du connecteur demandeur ; absent = racine
+// par défaut (affichage tilde lisible + commande simple).
+export function buildTerminalPairingMessage(stateRoot) {
+  const authHint = stateRoot ? `${stateRoot}/auth` : SHARED_AUTH_HINT;
+  const command = stateRoot ? `WHATSAPP_MCP_STATE_ROOT=${stateRoot} ${PAIR_COMMAND}` : PAIR_COMMAND;
   return (
-    "WhatsApp n'est pas appairé. Lance, dans un terminal, sur cette machine :\n" +
-    `  ${PAIR_COMMAND}\n` +
-    "Cette commande affiche un QR code (ou un code d'appairage) à saisir sur ton " +
-    `téléphone, et écrit l'appairage dans l'état partagé ${SHARED_AUTH_HINT} — jamais ` +
-    "dans un checkout."
+    "WhatsApp n'est pas appairé. Un seul process peut tenir le verrou auth/ à la fois : " +
+    "arrête d'abord le serveur en cours, puis appaire au terminal, sur cette machine :\n" +
+    "  1. Quitte Claude Desktop (Cmd-Q), ou : npm run stop\n" +
+    `  2. ${command}\n` +
+    "Cette commande affiche un QR (ou un code d'appairage) à saisir sur ton téléphone, et " +
+    `écrit l'appairage dans l'état partagé ${authHint} — jamais dans un checkout.`
   );
 }
 
@@ -58,24 +68,24 @@ export function buildPairingCodeMessage(code) {
 // Le chemin guidé pour un refus « rien n'est appairé » (list_groups, grant_channel,
 // get_recent_messages, session_open) — jamais un simple « non connecté » (critère
 // d'acceptation de la fiche).
-export function buildGuidedPairingRefusal(isElicitationSupported) {
+export function buildGuidedPairingRefusal(isElicitationSupported, stateRoot) {
   if (isElicitationSupported) {
     return (
       "WhatsApp n'est pas appairé. Utilise l'outil 'whatsapp_pair' : il demande ton " +
       "numéro de téléphone puis affiche un code d'appairage à saisir sur ton téléphone."
     );
   }
-  return buildTerminalPairingMessage();
+  return buildTerminalPairingMessage(stateRoot);
 }
 
 // Pilote le flux guidé de l'outil MCP `whatsapp_pair`. Effets de bord injectés
 // (elicitInput, requestPairingCode) -> testable sans Baileys ni humain (comme
 // buildConfirmGrant/buildSessionConsent dans consent.js). ADR-0005 : ce flux ne fait
 // JAMAIS le geste lui-même sans un numéro fourni par l'humain via l'élicitation.
-export function buildPairingFlow({ isElicitationSupported, elicitInput, requestPairingCode, log = () => {} }) {
+export function buildPairingFlow({ isElicitationSupported, elicitInput, requestPairingCode, stateRoot, log = () => {} }) {
   return async () => {
     if (!isElicitationSupported()) {
-      return { route: "terminal", message: buildTerminalPairingMessage() };
+      return { route: "terminal", message: buildTerminalPairingMessage(stateRoot) };
     }
 
     let res;
@@ -88,7 +98,7 @@ export function buildPairingFlow({ isElicitationSupported, elicitInput, requestP
       // Fail-safe : le formulaire n'a pas pu être présenté -> repli sur la procédure
       // terminal, jamais un crash ni un silence.
       log("Élicitation d'appairage impossible :", e?.message);
-      return { route: "terminal", message: buildTerminalPairingMessage(), reason: "élicitation indisponible" };
+      return { route: "terminal", message: buildTerminalPairingMessage(stateRoot), reason: "élicitation indisponible" };
     }
 
     const phoneNumber = String(res?.content?.phoneNumber || "").trim();

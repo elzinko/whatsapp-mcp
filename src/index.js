@@ -24,6 +24,7 @@ import { readStrongAuthEnabled } from "./strongauth.js";
 import { checkPresence } from "./touchid.js";
 import { WhatsAppClient, log, toRecentMessage } from "./whatsapp.js";
 import { SessionRegistry } from "./sessions.js";
+import { deployedStateRoot } from "./setup.js";
 
 const settings = new Settings(config.settingsFile).load();
 // Le plafond (ADR-0002). Au tout premier démarrage, il est généré depuis les grants
@@ -239,14 +240,19 @@ const TOOLS = [
   },
 ];
 
-// « Rien n'est appairé » (fiche 20260916130039008), à distinguer d'une reconnexion
-// transitoire : grant_channel EXIGE isReady() avant d'écrire un grant (voir
-// whatsapp.js#grantChannel), donc un grant PERSISTÉ prouve qu'un appairage a déjà
-// réussi au moins une fois — même si CE process est actuellement déconnecté/en
-// reconnexion. Ne guider que le cas « jamais rien n'a été appairé », pas chaque
-// coupure réseau.
+// Racine d'état à PORTER dans le repli terminal d'appairage (voie 2, revue Codex #40) :
+// renseignée seulement si le connecteur demandeur n'est PAS sur la racine par défaut
+// (ex. rail dev whatsapp-feat -> ~/.config/whatsapp-mcp-dev). Sinon `npm run pair`, lancé
+// dans un autre shell, retomberait sur la prod. undefined = racine par défaut.
+const pairStateRoot = deployedStateRoot() === deployedStateRoot({}) ? undefined : deployedStateRoot();
+
+// « Rien n'est appairé » (fiche 20260916130039008) : le compte n'a PAS d'identifiants
+// WhatsApp enregistrés (creds.registered). Signal AUTORITAIRE, pas les grants — un logout
+// 401 efface auth/ mais conserve settings.json, donc un compte délié a grants>0 tout en
+// devant ré-appairer (revue Codex #40). En reconnexion réseau (registered=true, pas encore
+// « open »), registered reste vrai : on NE guide PAS, la reconnexion suffit.
 function nothingPairedYet() {
-  return !wa.isReady() && wa.settings.grants.size === 0;
+  return !wa.isRegistered();
 }
 
 function ok(data) {
@@ -315,7 +321,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "list_groups": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         const { groups, hiddenOutsideAllowlist, hiddenOutsideProfile } = await wa.listGroups();
         const resolvedSession = args.session ? sessions.resolve(args.session) : null;
         const inSession = resolvedSession ? new Set(resolvedSession.channels) : null;
@@ -343,14 +349,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "grant_channel":
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         return ok(await wa.grantChannel(args.channel));
 
       case "revoke_channel":
         return ok(wa.revokeChannel(args.channel));
 
       case "session_open": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         const requested = Array.isArray(args.channels) ? args.channels : [];
         if (requested.length === 0) return fail("Fournis au moins un canal ('channels').");
 
@@ -408,7 +414,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "get_recent_messages": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation));
+        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         if (!args.session) {
           return fail(
             "Aucune session : cet outil exige un jeton de session. Ouvre-en une avec " +
@@ -494,6 +500,7 @@ const pairingFlow = buildPairingFlow({
   isElicitationSupported: () => clientSupportsElicitation,
   elicitInput: (params) => server.elicitInput(params),
   requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
+  stateRoot: pairStateRoot,
   log,
 });
 

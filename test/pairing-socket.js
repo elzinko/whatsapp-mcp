@@ -118,6 +118,28 @@ try {
     check("requestPairingCode() sur un compte déjà appairé -> refuse", threw === true);
   }
 
+  // --- 6) isRegistered() lit les CREDS PERSISTÉS (creds.json), jamais les grants ---
+  // Régression Codex #40 : un logout 401 efface auth/ (creds.json absent) mais CONSERVE
+  // settings.json (grants>0). Un tel compte doit être vu NON appairé, pour re-guider.
+  {
+    const config = freshConfig(tmp); // auth vide = pas de creds.json (état "logout")
+    const { wa } = makeClient(config);
+    wa.settings.grants.set("x@g.us", { subject: "X" }); // grants présents malgré le logout
+    check("auth vidé (logout) + grants>0 -> NON appairé (re-guide, revue Codex #40)", wa.isRegistered() === false);
+  }
+  {
+    const config = freshConfig(tmp);
+    fs.writeFileSync(path.join(config.authDir, "creds.json"), JSON.stringify({ registered: true }));
+    const { wa } = makeClient(config);
+    check("creds.json registered:true -> appairé", wa.isRegistered() === true);
+  }
+  {
+    const config = freshConfig(tmp);
+    fs.writeFileSync(path.join(config.authDir, "creds.json"), JSON.stringify({ registered: false }));
+    const { wa } = makeClient(config);
+    check("creds.json registered:false (jamais appairé) -> non appairé", wa.isRegistered() === false);
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
 } catch (e) {
   console.error("Erreur test:", e);
