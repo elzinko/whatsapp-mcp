@@ -5,9 +5,9 @@ type: feature
 priority: P1
 version:
 epic:
-status: ready
+status: shipped
 ready: 2026-09-17
-pr:
+pr: "#40"
 created: 2026-09-16
 ---
 
@@ -19,7 +19,7 @@ clair. Cette fiche fait de l'appairage **le premier rôle** du MCP : quand perso
 connecté, il **propose** la connexion — par élicitation dans le chat si le client le permet,
 sinon en indiquant la procédure à lancer au terminal. Une fois, sur la machine, ton geste.
 
-Indépendante du démon ([fiche 0005](0005-demon-frontends-mcp.md)) : livrable **avant** lui.
+Indépendante du démon ([fiche 0005](../0005-demon-frontends-mcp.md)) : livrable **avant** lui.
 
 ## Contexte / Problème
 
@@ -28,7 +28,7 @@ Indépendante du démon ([fiche 0005](0005-demon-frontends-mcp.md)) : livrable *
 - Une session qui appelle un outil de lecture sans appairage obtient un refus « non connecté »
   (`state: "qr"`), mais **aucun moyen guidé** de s'appairer.
 - L'appairage est pourtant la **porte d'entrée** de tout l'outil : sans lui, rien ne marche.
-- Contrainte [ADR-0005](../docs/adr/0005-le-serveur-ne-configure-pas-le-client.md) : le serveur
+- Contrainte [ADR-0005](../../docs/adr/0005-le-serveur-ne-configure-pas-le-client.md) : le serveur
   ne configure pas le client ; l'appairage reste un **geste humain**. On guide, on n'automatise pas.
 
 ## Proposition
@@ -43,7 +43,7 @@ proposer la connexion, selon ce que le client permet :
   **commande exacte** à lancer (ex. `npm run pair`) qui affiche le QR / le code et écrit
   l'appairage dans l'état partagé `~/.config/whatsapp-mcp/`.
 
-L'appairage vise l'**état partagé** ([ADR-0007](../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md)),
+L'appairage vise l'**état partagé** ([ADR-0007](../../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md)),
 donc il profite à toutes les surfaces. Reste fort-authentifié là où c'est pertinent (ADR-0003).
 
 ## Critères d'acceptation
@@ -102,11 +102,11 @@ Ancrée dans le code (exploration du 2026-09-17). Constructible sur l'existant :
 
 ## Notes
 
-- **Indépendante du démon** ([fiche 0005](0005-demon-frontends-mcp.md)) : l'appairage guidé marche
+- **Indépendante du démon** ([fiche 0005](../0005-demon-frontends-mcp.md)) : l'appairage guidé marche
   déjà sur le modèle un-serveur actuel ; il n'attend pas la phase 2.
 - Sépare proprement les deux phases voulues par le PO : (1) appairage initial unique ; (2) accès
-  par session — déjà livré, [fiche 20260902223310499](done/20260902223310499_droits-par-session-jeton-porte.md).
-- Fort-auth systématique sur les grants : [ADR-0003](../docs/adr/0003-consentement-par-presence-touch-id.md).
+  par session — déjà livré, [fiche 20260902223310499](20260902223310499_droits-par-session-jeton-porte.md).
+- Fort-auth systématique sur les grants : [ADR-0003](../../docs/adr/0003-consentement-par-presence-touch-id.md).
 - Aligner le vocabulaire et le flux avec le travail « autorisation par session sans admin » en
   cours sur `google-mcp-multi-account`.
 - **Priorité P1 confirmée par le PO (2026-09-17)** : porte d'entrée de tout l'outil, indépendante du démon.
