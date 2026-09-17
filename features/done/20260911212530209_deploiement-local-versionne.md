@@ -21,8 +21,8 @@ blue-green de `google-mcp-multi-account` : version figée + lien `current`, un `
 revenir en arrière, l'état (appairage/grants) dans un dossier à part. Elle ajoute une commande pour
 **déployer ta branche de dev et la tester en parallèle** du déployé, puis la promouvoir si elle tient.
 
-Décidé dans [ADR-0007](../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md) (Option A).
-Indépendant du démon ([fiche 0005](0005-demon-frontends-mcp.md)).
+Décidé dans [ADR-0007](../../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md) (Option A).
+Indépendant du démon ([fiche 0005](../0005-demon-frontends-mcp.md)).
 
 ## Contexte / Problème
 
@@ -39,9 +39,9 @@ Indépendant du démon ([fiche 0005](0005-demon-frontends-mcp.md)).
    stable pour la valider avant de promouvoir.
 
 Contrainte propre à WhatsApp (absente chez le voisin google, dont le broker est sans état) : **une
-session = un seul process vivant** sur `auth/` (Baileys, verrou [fiche 0009](done/0009-verrou-exclusif-auth.md)).
+session = un seul process vivant** sur `auth/` (Baileys, verrou [fiche 0009](0009-verrou-exclusif-auth.md)).
 Faire tourner stable **et** dev en même temps exige donc soit un appairage de dev séparé (phase 1),
-soit le démon (phase 2, [fiche 0005](0005-demon-frontends-mcp.md)).
+soit le démon (phase 2, [fiche 0005](../0005-demon-frontends-mcp.md)).
 
 ## Proposition
 
@@ -60,7 +60,7 @@ Commandes (portées de `mag`) : figer+basculer (`current`/`previous`), **`dev de
 branche de travail sur un rail à part, nom de connecteur propre, ne touche jamais `current`),
 `update` (sans clone), `revert` (lit `previous`). Nom de connecteur **figé** `whatsapp-mcp` d'une
 version à l'autre (sinon Claude réinitialise les permissions d'outils). `install:client`
-([fiche 0010](done/0010-installer-doctor-cli.md)) étendu pour pointer `current` et poser l'`env` d'état.
+([fiche 0010](0010-installer-doctor-cli.md)) étendu pour pointer `current` et poser l'`env` d'état.
 
 ## Critères d'acceptation
 
@@ -77,7 +77,7 @@ version à l'autre (sinon Claude réinitialise les permissions d'outils). `insta
       peut la tester puis la promouvoir *(promotion = merger puis `npm run deploy`)*.
 - [x] Faire tourner stable + dev **en parallèle** est documenté : appairage de dev séparé
       (`~/.config/whatsapp-mcp-dev/`, connecteur `whatsapp-feat`) en phase 1 ; démon (0005) en phase 2.
-      *(voir [docs/deploiement-local.md](../docs/deploiement-local.md))*
+      *(voir [docs/deploiement-local.md](../../docs/deploiement-local.md))*
 - [x] `install:client` pointe `current` et pose l'`env` d'état ; le nom de connecteur reste `whatsapp-mcp`.
       *(env posé par le shim pour la stable ; en dur dans l'entrée pour le rail dev)*
 
@@ -91,7 +91,7 @@ helpers `src/setup.js`, scripts npm `deploy` · `deploy:dev` · `deploy:list` ·
 **Reste à faire par un humain** (touche l'environnement réel) : brancher **ton** Desktop sur `current`
 et vérifier la version via `whatsapp_status` ; rejouer le contre-test `rm -rf node_modules` ; scanner
 le QR du rail dev (`whatsapp-feat`) pour valider le parallèle. **Suite optionnelle** : porter `update`
-(re-tirer un tag sans clone) ; le démon = [fiche 0005](0005-demon-frontends-mcp.md).
+(re-tirer un tag sans clone) ; le démon = [fiche 0005](../0005-demon-frontends-mcp.md).
 
 ## Comment vérifier
 
@@ -106,13 +106,13 @@ le QR du rail dev (`whatsapp-feat`) pour valider le parallèle. **Suite optionne
 
 ## Notes
 
-- Décision et trade-offs complets : [ADR-0007](../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md).
-- **Frère indépendant du démon** [fiche 0005](0005-demon-frontends-mcp.md) : le démon résout le
+- Décision et trade-offs complets : [ADR-0007](../../docs/adr/0007-deploiement-local-versionne-et-moteur-partage.md).
+- **Frère indépendant du démon** [fiche 0005](../0005-demon-frontends-mcp.md) : le démon résout le
   *runtime* (une session multiplexée) ; cette fiche résout le *release* (versionner/promouvoir/revenir).
   Les deux étages partagent la *forme* de google, pas le même chantier.
-- Étend [fiche 0010](done/0010-installer-doctor-cli.md) (install/doctor) ; recoupe la piste « commande
-  `wire` » de [fiche 20260902223310640](20260902223310640_emballage-plugin-cowork-marketplace.md).
-- Reste conforme à [ADR-0005](../docs/adr/0005-le-serveur-ne-configure-pas-le-client.md) : le
+- Étend [fiche 0010](0010-installer-doctor-cli.md) (install/doctor) ; recoupe la piste « commande
+  `wire` » de [fiche 20260902223310640](../20260902223310640_emballage-plugin-cowork-marketplace.md).
+- Reste conforme à [ADR-0005](../../docs/adr/0005-le-serveur-ne-configure-pas-le-client.md) : le
   déploiement est un **geste humain** (CLI au terminal), le serveur ne configure pas le client seul.
 - Référence à porter : `google-mcp-multi-account` — `scripts/deploy-local.sh` (figer + `current`/`previous`),
   `scripts/update.sh`, `mag revert`, `mag dev deploy`, `bin/google-mcp` (shim). Copie, pas extraction.

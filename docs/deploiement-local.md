@@ -12,7 +12,7 @@ On fige chaque version dans un dossier à part, un lien `current` désigne celle
 et l'appairage WhatsApp vit dans un troisième dossier qu'aucune mise à jour ne touche.
 
 Décision et compromis complets : [ADR-0007](adr/0007-deploiement-local-versionne-et-moteur-partage.md).
-Fiche : [20260911212530209](../features/20260911212530209_deploiement-local-versionne.md).
+Fiche : [20260911212530209](../features/done/20260911212530209_deploiement-local-versionne.md).
 
 ## Le schéma : trois dossiers, trois rôles
 
