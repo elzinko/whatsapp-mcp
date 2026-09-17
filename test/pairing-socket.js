@@ -205,6 +205,40 @@ try {
     check("currentQrArt() avec lastQR posé -> string non vide", typeof art === "string" && art.length > 0);
   }
 
+  // --- 11) requestPairingCode échoue (WS pas prêt, revue Codex #42 P1) : le numéro est
+  // mémorisé (la voie qr réessaiera) et _pairCodeRequested est relâché (réessai autorisé),
+  // au lieu d'un état bloqué. L'exception est propagée (le flux élicitation la replie).
+  {
+    const { wa } = makeClient(freshConfig(tmp), { registered: false });
+    wa.sock = {
+      authState: { creds: { registered: false } },
+      requestPairingCode: async () => {
+        throw new Error("Connection Closed");
+      },
+    };
+    let threw = false;
+    try {
+      await wa.requestPairingCode("+33698765432");
+    } catch {
+      threw = true;
+    }
+    check("requestPairingCode échec -> rejette (propagé au flux)", threw === true);
+    check("requestPairingCode échec -> numéro mémorisé pour la voie qr", wa._pairPhoneNumber === "+33698765432");
+    check("requestPairingCode échec -> _pairCodeRequested relâché (réessai possible)", wa._pairCodeRequested === false);
+  }
+
+  // --- 12) QR effacé à la fermeture (revue Codex #42 P2) : plus de QR mort exposé pendant
+  // le backoff. On émet `qr` (lastQR posé) puis `close` (401, sans reconnexion) -> null.
+  {
+    const { wa, emit } = makeClient(freshConfig(tmp), { registered: false });
+    await wa.start();
+    await emit("connection.update", { qr: "FAKE_QR_DATA" });
+    check("après event qr -> currentQrArt() renvoie le QR", typeof wa.currentQrArt() === "string");
+    await emit("connection.update", { connection: "close", lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    check("après close -> lastQR effacé", wa.lastQR === null);
+    check("après close -> currentQrArt() null (pas de QR mort exposé)", wa.currentQrArt() === null);
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
 } catch (e) {
   console.error("Erreur test:", e);

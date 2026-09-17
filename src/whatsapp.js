@@ -195,10 +195,22 @@ export class WhatsAppClient {
     if (this.sock.authState?.creds?.registered) {
       throw new Error("Ce compte WhatsApp est déjà appairé.");
     }
-    const code = await this.sock.requestPairingCode(phoneNumber);
-    this.pairingCode = code;
-    log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
-    return code;
+    // Mémorise le numéro : si CET appel échoue parce que le WS n'est pas encore prêt (voie
+    // élicitation appelée dans la fenêtre de boot, revue Codex #42 P1), la voie gated du
+    // handler `qr` le réessaiera dès que Baileys sera prêt. Le drapeau _pairCodeRequested,
+    // posé SYNCHRONEMENT ici (avant l'await), est la garde anti double-appel commune aux
+    // DEUX voies (directe + gated) ; relâché sur échec pour réautoriser une tentative.
+    this._pairPhoneNumber = phoneNumber;
+    this._pairCodeRequested = true;
+    try {
+      const code = await this.sock.requestPairingCode(phoneNumber);
+      this.pairingCode = code;
+      log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
+      return code;
+    } catch (e) {
+      this._pairCodeRequested = false;
+      throw e;
+    }
   }
 
   // Rend `this.lastQR` en art ASCII (via qrcode-terminal), pour l'exposer dans la RÉPONSE
@@ -436,11 +448,11 @@ export class WhatsAppClient {
           !this.pairingCode &&
           !this._pairCodeRequested
         ) {
-          this._pairCodeRequested = true; // synchrone AVANT l'await : ferme la fenêtre de double-appel
+          // requestPairingCode pose _pairCodeRequested synchronement (garde anti double-appel
+          // commune aux deux voies) et le relâche sur échec -> un prochain `qr` réessaiera.
           try {
             await this.requestPairingCode(this._pairPhoneNumber);
           } catch (e) {
-            this._pairCodeRequested = false; // échec -> réautoriser une tentative au prochain `qr`
             log("Impossible d'obtenir un code d'appairage :", e?.message);
           }
         }
@@ -477,6 +489,10 @@ export class WhatsAppClient {
       }
       if (connection === "close") {
         this.state = "closed";
+        // Le socket est mort : son QR n'est plus scannable (revue Codex #42 P2). On l'oublie
+        // pour que currentQrArt()/whatsapp_pair n'exposent pas un QR périmé pendant le backoff
+        // de reconnexion. Une reconnexion émettra un nouveau `qr` qui rafraîchira lastQR.
+        this.lastQR = null;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const plan = planReconnect(statusCode, this.reconnectAttempts + 1);
 

@@ -504,6 +504,7 @@ const pairingFlow = buildPairingFlow({
   isElicitationSupported: () => clientSupportsElicitation,
   elicitInput: (params) => server.elicitInput(params),
   requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
+  currentQrArt: () => wa.currentQrArt(),
   stateRoot: pairStateRoot,
   log,
 });
