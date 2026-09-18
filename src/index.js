@@ -19,7 +19,7 @@ import { Settings } from "./settings.js";
 import { Allowlist } from "./allowlist.js";
 import { Profiles } from "./profiles.js";
 import { buildConfirmGrant, buildGrantConsent, buildSessionConsent } from "./consent.js";
-import { buildGuidedPairingRefusal, buildPairingFlow } from "./pairing.js";
+import { buildGuidedPairingRefusal, buildPairingFlow, attachQrArt } from "./pairing.js";
 import { readStrongAuthEnabled } from "./strongauth.js";
 import { checkPresence } from "./touchid.js";
 import { WhatsAppClient, log, toRecentMessage } from "./whatsapp.js";
@@ -290,7 +290,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (result.route === "declined") {
           return fail(`Appairage refusé par l'humain (${result.reason}).`);
         }
-        return ok(result);
+        // Voie terminal (repli, ou pas d'élicitation) : ajoute le QR ASCII à la réponse
+        // d'outil (fiche 20260917180706311) — affichable en chat/Code, sans terminal.
+        // Voie élicitation : inchangé, le code est déjà dans le message (attachQrArt
+        // n'y touche pas). Jamais sur stdout : ce texte transite par le protocole MCP.
+        return ok(attachQrArt(result, wa.currentQrArt()));
       }
 
       case "whatsapp_status": {
@@ -500,6 +504,7 @@ const pairingFlow = buildPairingFlow({
   isElicitationSupported: () => clientSupportsElicitation,
   elicitInput: (params) => server.elicitInput(params),
   requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
+  currentQrArt: () => wa.currentQrArt(),
   stateRoot: pairStateRoot,
   log,
 });

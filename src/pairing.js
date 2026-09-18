@@ -65,6 +65,19 @@ export function buildPairingCodeMessage(code) {
   );
 }
 
+// Voie élicitation, cas « code pas encore prêt » (revue Codex #42 P1) : la demande de code
+// a échoué parce que le WebSocket n'était pas prêt (fenêtre de boot). On ne renvoie JAMAIS
+// une exception nue : le numéro est mémorisé côté client, la voie `qr` demandera le code dès
+// que Baileys sera prêt. En attendant, on propose le QR (scannable) ou on invite à réessayer.
+export function buildPairingPendingMessage(hasQr) {
+  return (
+    "Le code d'appairage n'est pas encore prêt (connexion WhatsApp en cours). " +
+    (hasQr
+      ? "Scanne le QR ci-dessous, ou rappelle 'whatsapp_pair' dans un instant pour le code."
+      : "Rappelle 'whatsapp_pair' dans un instant : le code arrive dès que la connexion est montée.")
+  );
+}
+
 // Le chemin guidé pour un refus « rien n'est appairé » (list_groups, grant_channel,
 // get_recent_messages, session_open) — jamais un simple « non connecté » (critère
 // d'acceptation de la fiche).
@@ -82,7 +95,7 @@ export function buildGuidedPairingRefusal(isElicitationSupported, stateRoot) {
 // (elicitInput, requestPairingCode) -> testable sans Baileys ni humain (comme
 // buildConfirmGrant/buildSessionConsent dans consent.js). ADR-0005 : ce flux ne fait
 // JAMAIS le geste lui-même sans un numéro fourni par l'humain via l'élicitation.
-export function buildPairingFlow({ isElicitationSupported, elicitInput, requestPairingCode, stateRoot, log = () => {} }) {
+export function buildPairingFlow({ isElicitationSupported, elicitInput, requestPairingCode, currentQrArt, stateRoot, log = () => {} }) {
   return async () => {
     if (!isElicitationSupported()) {
       return { route: "terminal", message: buildTerminalPairingMessage(stateRoot) };
@@ -106,10 +119,38 @@ export function buildPairingFlow({ isElicitationSupported, elicitInput, requestP
       return { route: "declined", reason: `formulaire ${res?.action || "sans réponse"}` };
     }
 
-    const pairingCode = await requestPairingCode(phoneNumber);
+    let pairingCode;
+    try {
+      pairingCode = await requestPairingCode(phoneNumber);
+    } catch (e) {
+      // Le WS n'était pas prêt (connexion en cours) -> ne JAMAIS renvoyer une exception nue
+      // (revue Codex #42 P1). Le numéro est mémorisé côté client (requestPairingCode) : la
+      // voie `qr` redemandera le code dès que Baileys sera prêt. En attendant, on donne le QR
+      // (scannable) ou un hint d'attente — un chemin, jamais un silence.
+      log("Code d'appairage pas prêt (connexion en cours) :", e?.message);
+      const qrArt = currentQrArt ? currentQrArt() : null;
+      return { route: "pending", message: buildPairingPendingMessage(!!qrArt), qrArt: qrArt || null };
+    }
     // Ne JAMAIS renvoyer le numéro saisi : la réponse d'un outil MCP remonte dans le
     // contexte du LLM, or la saisie d'élicitation doit rester hors de sa portée
     // (ADR-0001/0002). Le numéro ne sert à rien en aval ; seul le code est affiché.
     return { route: "elicitation", pairingCode, message: buildPairingCodeMessage(pairingCode) };
+  };
+}
+
+// Attache le QR ASCII à un résultat de buildPairingFlow, pour que `whatsapp_pair`
+// (fiche 20260917180706311) réponde avec de quoi appairer SANS terminal :
+//  - voie 1 (élicitation, code obtenu) : rien à ajouter, le code est déjà dans le message ;
+//  - voie terminal (pas d'élicitation, ou élicitation en échec) : le QR ASCII (rendu par
+//    WhatsAppClient.currentQrArt(), depuis this.lastQR) s'ajoute à la procédure terminal —
+//    absent (connexion pas encore montée) -> un hint d'attente plutôt qu'un silence.
+// `qrArt` est fourni par l'appelant (jamais calculé ici) : cette fonction reste PURE,
+// testable sans WhatsAppClient ni qrcode-terminal.
+export function attachQrArt(result, qrArt) {
+  if (result.route !== "terminal") return result;
+  return {
+    ...result,
+    qrArt: qrArt || null,
+    qrHint: qrArt ? undefined : "QR pas encore disponible : réessaie dans un instant, la connexion se monte.",
   };
 }

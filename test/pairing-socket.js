@@ -21,17 +21,35 @@ function check(label, cond) {
 }
 
 // Mock Baileys minimal : juste assez pour que start() traverse sans réseau.
+// `ev.on` MÉMORISE les handlers par event (au lieu de les ignorer) : `emit` permet aux
+// tests de rejouer un event (ex. `connection.update` avec `qr`) et d'observer QUAND
+// requestPairingCode est réellement appelé — le bug (Connection Closed) venait
+// justement d'un appel trop tôt, avant que Baileys soit prêt (event `qr`).
 function fakeSock({ registered = false, code = "ABCD-1234" } = {}) {
   let seenPhoneNumber = null;
+  let callCount = 0;
+  const handlers = {};
   const sock = {
     authState: { creds: { registered } },
-    ev: { on: () => {} }, // aucun événement n'est jamais émis dans ce test
+    ev: {
+      on: (event, handler) => {
+        handlers[event] = handler;
+      },
+    },
     requestPairingCode: async (phoneNumber) => {
       seenPhoneNumber = phoneNumber;
+      callCount += 1;
       return code;
     },
   };
-  return { sock, seenPhoneNumber: () => seenPhoneNumber };
+  return {
+    sock,
+    seenPhoneNumber: () => seenPhoneNumber,
+    callCount: () => callCount,
+    // Rejoue un event Baileys (ex. "connection.update") vers le handler enregistré par
+    // start(). Attend le handler (il est async) : les tests peuvent observer son effet.
+    emit: (event, payload) => handlers[event]?.(payload),
+  };
 }
 
 function freshConfig(tmp) {
@@ -55,7 +73,7 @@ function freshConfig(tmp) {
 
 function makeClient(config, { registered = false, code = "ABCD-1234" } = {}) {
   const settings = new Settings(config.settingsFile).load();
-  const { sock, seenPhoneNumber } = fakeSock({ registered, code });
+  const { sock, seenPhoneNumber, callCount, emit } = fakeSock({ registered, code });
   const deps = {
     useMultiFileAuthState: async () => ({
       state: { creds: { registered } },
@@ -65,18 +83,21 @@ function makeClient(config, { registered = false, code = "ABCD-1234" } = {}) {
     makeWASocket: () => sock,
   };
   const wa = new WhatsAppClient(config, settings, undefined, undefined, deps);
-  return { wa, seenPhoneNumber };
+  return { wa, seenPhoneNumber, callCount, emit };
 }
 
 try {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "wa-pairing-socket-"));
 
-  // --- 1) start(phoneNumber), compte NON enregistré -> code demandé et mémorisé ---
+  // --- 1) start(phoneNumber), compte NON enregistré -> code demandé et mémorisé QUAND
+  // Baileys est prêt (event `qr`), pas avant (timing réparé, fiche 20260917180706311 —
+  // demander le code juste après makeWASocket a produit "Connection Closed" en réel).
   {
-    const { wa, seenPhoneNumber } = makeClient(freshConfig(tmp), { registered: false, code: "ABCD-1234" });
+    const { wa, seenPhoneNumber, emit } = makeClient(freshConfig(tmp), { registered: false, code: "ABCD-1234" });
     await wa.start("+33612345678");
-    check("start(numéro) -> code d'appairage mémorisé sur le client", wa.pairingCode === "ABCD-1234");
-    check("start(numéro) -> le numéro fourni est transmis à Baileys", seenPhoneNumber() === "+33612345678");
+    await emit("connection.update", { qr: "FAKE_QR" });
+    check("start(numéro) + event qr -> code d'appairage mémorisé sur le client", wa.pairingCode === "ABCD-1234");
+    check("start(numéro) + event qr -> le numéro fourni est transmis à Baileys", seenPhoneNumber() === "+33612345678");
   }
 
   // --- 2) start() SANS numéro -> comportement EXISTANT inchangé (aucun code demandé) ---
@@ -138,6 +159,84 @@ try {
     fs.writeFileSync(path.join(config.authDir, "creds.json"), JSON.stringify({ registered: false }));
     const { wa } = makeClient(config);
     check("creds.json registered:false (jamais appairé) -> non appairé", wa.isRegistered() === false);
+  }
+
+  // --- 7) TIMING (fiche 20260917180706311, bug confirmé en réel) : requestPairingCode
+  // n'est appelé qu'à l'event `qr` (WS prêt), jamais juste après start() (trop tôt ->
+  // Connection Closed en réel, non détecté par l'ancien mock qui n'émettait rien).
+  {
+    const { wa, callCount, emit } = makeClient(freshConfig(tmp), { registered: false, code: "ABCD-1234" });
+    await wa.start("+33612345678");
+    check("start(numéro) synchrone -> requestPairingCode PAS ENCORE appelé (avant tout event)", callCount() === 0);
+    check("start(numéro) synchrone -> pairingCode pas encore posé", wa.pairingCode === null);
+
+    await emit("connection.update", { qr: "FAKE_QR_DATA" });
+    check("event qr -> requestPairingCode appelé À CE MOMENT", callCount() === 1);
+    check("event qr -> code mémorisé sur le client", wa.pairingCode === "ABCD-1234");
+    check("event qr -> lastQR capturé (le QR reste dispo en parallèle du code)", wa.lastQR === "FAKE_QR_DATA");
+
+    await emit("connection.update", { qr: "FAKE_QR_DATA_2" });
+    check("un second event qr -> requestPairingCode PAS redemandé (une seule fois)", callCount() === 1);
+  }
+
+  // --- 8) TIMING : sans numéro fourni, l'event qr ne demande jamais de code ---
+  {
+    const { wa, callCount, emit } = makeClient(freshConfig(tmp), { registered: false });
+    await wa.start();
+    await emit("connection.update", { qr: "FAKE_QR_DATA" });
+    check("event qr sans numéro fourni -> requestPairingCode jamais appelé", callCount() === 0);
+    check("event qr sans numéro fourni -> lastQR quand même capturé", wa.lastQR === "FAKE_QR_DATA");
+  }
+
+  // --- 9) TIMING : compte déjà enregistré -> l'event qr ne redemande pas de code ---
+  {
+    const { wa, callCount, emit } = makeClient(freshConfig(tmp), { registered: true });
+    await wa.start("+33612345678");
+    await emit("connection.update", { qr: "FAKE_QR_DATA" });
+    check("event qr, compte déjà appairé -> requestPairingCode jamais appelé", callCount() === 0);
+  }
+
+  // --- 10) currentQrArt() : rend lastQR en art ASCII, null si aucun QR ---
+  {
+    const { wa } = makeClient(freshConfig(tmp), { registered: false });
+    check("currentQrArt() sans QR -> null", wa.currentQrArt() === null);
+    wa.lastQR = "FAKE_QR_DATA";
+    const art = wa.currentQrArt();
+    check("currentQrArt() avec lastQR posé -> string non vide", typeof art === "string" && art.length > 0);
+  }
+
+  // --- 11) requestPairingCode échoue (WS pas prêt, revue Codex #42 P1) : le numéro est
+  // mémorisé (la voie qr réessaiera) et _pairCodeRequested est relâché (réessai autorisé),
+  // au lieu d'un état bloqué. L'exception est propagée (le flux élicitation la replie).
+  {
+    const { wa } = makeClient(freshConfig(tmp), { registered: false });
+    wa.sock = {
+      authState: { creds: { registered: false } },
+      requestPairingCode: async () => {
+        throw new Error("Connection Closed");
+      },
+    };
+    let threw = false;
+    try {
+      await wa.requestPairingCode("+33698765432");
+    } catch {
+      threw = true;
+    }
+    check("requestPairingCode échec -> rejette (propagé au flux)", threw === true);
+    check("requestPairingCode échec -> numéro mémorisé pour la voie qr", wa._pairPhoneNumber === "+33698765432");
+    check("requestPairingCode échec -> _pairCodeRequested relâché (réessai possible)", wa._pairCodeRequested === false);
+  }
+
+  // --- 12) QR effacé à la fermeture (revue Codex #42 P2) : plus de QR mort exposé pendant
+  // le backoff. On émet `qr` (lastQR posé) puis `close` (401, sans reconnexion) -> null.
+  {
+    const { wa, emit } = makeClient(freshConfig(tmp), { registered: false });
+    await wa.start();
+    await emit("connection.update", { qr: "FAKE_QR_DATA" });
+    check("après event qr -> currentQrArt() renvoie le QR", typeof wa.currentQrArt() === "string");
+    await emit("connection.update", { connection: "close", lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    check("après close -> lastQR effacé", wa.lastQR === null);
+    check("après close -> currentQrArt() null (pas de QR mort exposé)", wa.currentQrArt() === null);
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });

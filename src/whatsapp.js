@@ -146,6 +146,14 @@ export class WhatsAppClient {
     // Code d'appairage (voie 1, fiche 20260916130039008) : alternative textuelle au QR,
     // jouable en élicitation. null tant qu'aucun n'a été demandé.
     this.pairingCode = null;
+    // Numéro mémorisé par start(phoneNumber) (fiche 20260917180706311) : le code n'est
+    // demandé à Baileys QU'AU MOMENT de l'event `qr` (WS prêt), jamais juste après
+    // makeWASocket (trop tôt -> "Connection Closed", bug confirmé en réel).
+    this._pairPhoneNumber = null;
+    // Drapeau anti double-appel de requestPairingCode (revue v2 P2) : posé SYNCHRONEMENT
+    // avant l'await dans le handler `qr`, car Baileys ré-émet `qr` périodiquement — sans
+    // lui, un 2e `qr` pendant que le 1er appel est en vol écraserait le code affiché.
+    this._pairCodeRequested = false;
     this.startedAt = Date.now();
     this.stores = new Map(); // jid -> MessageStore (un tampon + une archive par canal)
     this.knownGroups = new Map(); // jid -> nom, snapshot du dernier fetch
@@ -187,10 +195,37 @@ export class WhatsAppClient {
     if (this.sock.authState?.creds?.registered) {
       throw new Error("Ce compte WhatsApp est déjà appairé.");
     }
-    const code = await this.sock.requestPairingCode(phoneNumber);
-    this.pairingCode = code;
-    log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
-    return code;
+    // Mémorise le numéro : si CET appel échoue parce que le WS n'est pas encore prêt (voie
+    // élicitation appelée dans la fenêtre de boot, revue Codex #42 P1), la voie gated du
+    // handler `qr` le réessaiera dès que Baileys sera prêt. Le drapeau _pairCodeRequested,
+    // posé SYNCHRONEMENT ici (avant l'await), est la garde anti double-appel commune aux
+    // DEUX voies (directe + gated) ; relâché sur échec pour réautoriser une tentative.
+    this._pairPhoneNumber = phoneNumber;
+    this._pairCodeRequested = true;
+    try {
+      const code = await this.sock.requestPairingCode(phoneNumber);
+      this.pairingCode = code;
+      log(`Code d'appairage : ${code} (à saisir sur le téléphone).`);
+      return code;
+    } catch (e) {
+      this._pairCodeRequested = false;
+      throw e;
+    }
+  }
+
+  // Rend `this.lastQR` en art ASCII (via qrcode-terminal), pour l'exposer dans la RÉPONSE
+  // de l'outil MCP `whatsapp_pair` (fiche 20260917180706311) — jamais sur stdout, réservé
+  // au JSON-RPC (voir en-tête du fichier). null tant qu'aucun QR n'est encore disponible
+  // (connexion pas encore montée jusqu'à l'event `qr`).
+  currentQrArt() {
+    if (!this.lastQR) return null;
+    let art = null;
+    // qrcode.generate(str, opts, cb) appelle cb de façon SYNCHRONE : on capture la
+    // string produite dans cette variable fermée, pas de promesse nécessaire.
+    qrcode.generate(this.lastQR, { small: true }, (output) => {
+      art = output;
+    });
+    return art;
   }
 
   // Tampon d'un canal, créé à la demande et rattaché à son archive JSONL.
@@ -374,16 +409,13 @@ export class WhatsAppClient {
     });
     this.sock = sock;
 
-    // Voie 1 (fiche 20260916130039008) : un numéro fourni ET un compte pas encore
-    // enregistré -> demande un code d'appairage plutôt que d'attendre le QR. Un compte
-    // déjà enregistré ignore le numéro (rien à ré-appairer).
-    if (phoneNumber && !sock.authState?.creds?.registered) {
-      try {
-        await this.requestPairingCode(phoneNumber);
-      } catch (e) {
-        log("Impossible d'obtenir un code d'appairage :", e?.message);
-      }
-    }
+    // Voie 1 (fiche 20260916130039008, timing réparé fiche 20260917180706311) : un
+    // numéro fourni -> mémorisé pour être joué au bon moment. PAS ICI : juste après
+    // makeWASocket, le WebSocket n'est pas encore prêt (Baileys exige d'attendre l'event
+    // `connection.update` avec `qr`) — l'appeler ici a provoqué en réel un
+    // « Impossible d'obtenir un code d'appairage : Connection Closed ». Le déclenchement
+    // réel se fait dans le handler `connection.update`, branche `qr`, plus bas.
+    this._pairPhoneNumber = phoneNumber || null;
 
     // Une écriture de creds qui échoue (ex: dossier auth supprimé sous nos pieds par
     // un autre process) ne doit JAMAIS crasher le serveur : rejet capté et journalisé.
@@ -405,6 +437,25 @@ export class WhatsAppClient {
         log("  Android : WhatsApp > ⋮ > Appareils connectés > Connecter un appareil");
         // qrcode-terminal écrit par défaut sur stdout -> on redirige vers stderr
         qrcode.generate(qr, { small: true }, (art) => process.stderr.write(art + "\n"));
+
+        // Voie 1 (timing réparé, fiche 20260917180706311) : le WebSocket est enfin PRÊT
+        // (Baileys vient d'émettre `qr`) — c'est le bon moment pour demander le code,
+        // jamais avant. Une seule fois (!this.pairingCode), et seulement si un numéro a
+        // été fourni pour un compte pas encore enregistré (rien à ré-appairer sinon).
+        if (
+          this._pairPhoneNumber &&
+          !sock.authState?.creds?.registered &&
+          !this.pairingCode &&
+          !this._pairCodeRequested
+        ) {
+          // requestPairingCode pose _pairCodeRequested synchronement (garde anti double-appel
+          // commune aux deux voies) et le relâche sur échec -> un prochain `qr` réessaiera.
+          try {
+            await this.requestPairingCode(this._pairPhoneNumber);
+          } catch (e) {
+            log("Impossible d'obtenir un code d'appairage :", e?.message);
+          }
+        }
       }
       if (connection === "connecting") {
         this.state = "connecting";
@@ -438,6 +489,10 @@ export class WhatsAppClient {
       }
       if (connection === "close") {
         this.state = "closed";
+        // Le socket est mort : son QR n'est plus scannable (revue Codex #42 P2). On l'oublie
+        // pour que currentQrArt()/whatsapp_pair n'exposent pas un QR périmé pendant le backoff
+        // de reconnexion. Une reconnexion émettra un nouveau `qr` qui rafraîchira lastQR.
+        this.lastQR = null;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const plan = planReconnect(statusCode, this.reconnectAttempts + 1);
 
