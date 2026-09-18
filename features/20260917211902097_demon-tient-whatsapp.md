@@ -3,7 +3,7 @@ id: "20260917211902097"
 title: Le démon tient WhatsApp — un seul process, derrière une socket locale
 type: feature
 priority: P2
-version:
+version: 0.3.0
 epic: "0005"
 status: idea
 ready:

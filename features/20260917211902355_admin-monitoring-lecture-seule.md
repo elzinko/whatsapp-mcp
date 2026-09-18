@@ -3,7 +3,7 @@ id: "20260917211902355"
 title: Admin de monitoring — regarder le démon, sans aucun pouvoir
 type: feature
 priority: P3
-version:
+version: 0.3.0
 epic: "0005"
 status: idea
 ready:

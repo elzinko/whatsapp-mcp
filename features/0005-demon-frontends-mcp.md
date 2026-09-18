@@ -3,7 +3,7 @@ id: 0005
 title: Démon unique + frontends MCP minces (phase 2 — multi-clients simultanés)
 type: epic
 priority: P2
-version:
+version: 0.3.0
 epic:
 status: idea
 ready:
