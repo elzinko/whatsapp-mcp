@@ -5,8 +5,8 @@ type: feature
 priority: P2
 version: 0.3.0
 epic: "0005"
-status: idea
-ready:
+status: ready
+ready: 2026-09-18
 pr:
 created: 2026-09-17
 ---
@@ -80,11 +80,14 @@ anti-parasite, pas une authentification** — et l'ADR doit l'écrire tel quel (
 
 ## Notes
 
-- Dépendance externe : `google-mcp-multi-account` (Phase 2A local broker, commit `12114ac`) —
-  accès constaté le 2026-09-03 (épic parent). À **reconstater** à l'implémentation.
+- Dépendance externe : `google-mcp-multi-account` — **accès reconstaté le 2026-09-18** : repo
+  présent (`/Users/elzinko/git/google-mcp-multi-account`), `gateway/broker_server.py`
+  (« Broker Phase 2 A — seul process qui exécute gws, loopback »), `gateway/sessions.py`,
+  `gateway/mcp_server.py`, `docs/policies.md` et le commit `12114ac` confirmés.
 - **À reprendre tel quel** : RPC mince / démon détenteur de la capacité / contrat stable au
-  milieu · `ensure_broker_running()` · NDJSON loopback deux verbes · policy évaluée en process
-  séparé avec « non classifiable = refus ».
+  milieu · le **patron *ensure-broker-running*** (ping → spawn détaché → polling borné → log en
+  append ; nom de symbole à adapter, pas importé verbatim) · NDJSON loopback deux verbes ·
+  policy évaluée en process séparé avec « non classifiable = refus ».
 - **À ne pas reprendre** : le bind TCP comme singleton (cf. [0009](done/0009-verrou-exclusif-auth.md)) ·
   le threading libre — une socket WhatsApp unique exige **une file + un worker unique**, là où
   le broker google est sans état.

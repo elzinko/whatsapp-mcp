@@ -20,6 +20,7 @@
 | [0012](done/0012-adr-serveur-ne-configure-pas-le-client.md) | ADR — le serveur MCP reste read-only et ne configure jamais le client | chore | P2 |  |  | ✅ shipped | #26 |
 | [0013](done/0013-garde-touchid-presence-grant.md) | Garde Touch ID (presence check) sur grant_channel — v1, portée de google-mcp | feature | P2 |  |  | ✅ shipped | e096a7a (poussé sur main, sans PR) |
 | [20260903085814506](done/20260903085814506_exposer-id-message-pour-ingestion.md) | Exposer l'id de message (et le JID canal) dans get_recent_messages pour une ingestion idempotente | feature | P2 |  |  | ✅ shipped | #24 |
+| [20260917211902097](20260917211902097_demon-tient-whatsapp.md) | Le démon tient WhatsApp — un seul process, derrière une socket locale | feature | P2 | 0.3.0 | 0005 | 🔵 ready |  |
 | [0011](done/0011-outil-aide-mcp.md) | Aide déclenchée — outil (et prompt) « comment j'utilise ce MCP ? » | feature | P3 |  |  | ✅ shipped | #9 |
 
 ## 🧭 Épics (jamais tirables — tirer leurs enfants ready, ADR-0017)
@@ -34,7 +35,6 @@
 
 | # | Titre | Type | Prio | Version | Épic | Statut | PR |
 |---|-------|------|------|---------|------|--------|----|
-| [20260917211902097](20260917211902097_demon-tient-whatsapp.md) | Le démon tient WhatsApp — un seul process, derrière une socket locale | feature | P2 | 0.3.0 | 0005 | 💡 idea |  |
 | [20260917211902225](20260917211902225_frontend-mcp-mince.md) | Le frontend MCP mince — parle au démon, plus jamais à WhatsApp | feature | P2 | 0.3.0 | 0005 | 💡 idea |  |
 | [0007](0007-elicitation-signee-touch-id.md) | Élicitation signée — consentement par authentification physique (Touch ID / Secure Enclave) | feature | P3 |  |  | 💡 idea |  |
 | [20260902223310640](20260902223310640_emballage-plugin-cowork-marketplace.md) | Emballage plugin Claude (marketplace elzinko) — skills + .mcp.json pour Cowork et Code | feature | P3 |  | 20260902223310355 | 💡 idea |  |
