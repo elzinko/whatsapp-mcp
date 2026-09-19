@@ -15,8 +15,10 @@ import {
   buildPairingRequestedSchema,
   buildPairingElicitationMessage,
   buildPairingCodeMessage,
+  buildPairingPendingMessage,
   buildGuidedPairingRefusal,
   buildPairingFlow,
+  attachQrArt,
 } from "../src/pairing.js";
 
 let failed = false;
@@ -147,6 +149,44 @@ try {
     );
   }
 
+  // Message d'attente (revue Codex #42 P1) : contenu assené selon la présence d'un QR.
+  check("pending (avec QR) -> invite à scanner le QR", buildPairingPendingMessage(true).includes("Scanne le QR"));
+  check("pending (sans QR) -> invite à rappeler whatsapp_pair", /whatsapp_pair/.test(buildPairingPendingMessage(false)));
+
+  // Client AVEC élicitation, numéro fourni, MAIS requestPairingCode échoue (WS pas prêt) ->
+  // route 'pending' + QR de repli, JAMAIS une exception nue (revue Codex #42 P1). Le numéro
+  // ne fuit toujours pas.
+  {
+    const flow = buildPairingFlow({
+      isElicitationSupported: () => true,
+      elicitInput: async () => ({ action: "accept", content: { phoneNumber: "+33612345678" } }),
+      requestPairingCode: async () => {
+        throw new Error("Connection Closed");
+      },
+      currentQrArt: () => "QR-ASCII-ART",
+    });
+    const res = await flow();
+    check("code pas prêt -> route 'pending' (jamais d'exception nue)", res.route === "pending");
+    check("code pas prêt -> QR de repli attaché à la réponse", res.qrArt === "QR-ASCII-ART");
+    check("code pas prêt -> message invite à scanner/réessayer", /Scanne le QR|whatsapp_pair/.test(res.message));
+    check("code pas prêt -> le numéro saisi NE FUIT PAS", !JSON.stringify(res).includes("+33612345678"));
+  }
+
+  // Même échec mais AUCUN QR encore dispo -> route 'pending', qrArt null, hint de réessai.
+  {
+    const flow = buildPairingFlow({
+      isElicitationSupported: () => true,
+      elicitInput: async () => ({ action: "accept", content: { phoneNumber: "+33612345678" } }),
+      requestPairingCode: async () => {
+        throw new Error("Connection Closed");
+      },
+      currentQrArt: () => null,
+    });
+    const res = await flow();
+    check("code pas prêt + pas de QR -> route 'pending', qrArt null", res.route === "pending" && res.qrArt === null);
+    check("code pas prêt + pas de QR -> hint de réessai", /whatsapp_pair/.test(res.message));
+  }
+
   // Client AVEC élicitation, decline -> refus, jamais de code demandé.
   {
     let requestCalled = false;
@@ -174,6 +214,29 @@ try {
     });
     const res = await flow();
     check("élicitation indisponible -> repli voie terminal", res.route === "terminal" && res.message.includes("npm run pair"));
+  }
+
+  // --- 3) attachQrArt (fiche 20260917180706311) : expose le QR ASCII dans la réponse
+  // d'outil `whatsapp_pair` pour la voie QR / repli terminal — jamais pour la voie 1
+  // (élicitation + code obtenu), où le code est déjà dans le message.
+  {
+    const terminalResult = { route: "terminal", message: "procédure terminal…" };
+    const withQr = attachQrArt(terminalResult, "QR-ASCII-ART");
+    check("voie terminal + QR dispo -> qrArt posé dans la réponse", withQr.qrArt === "QR-ASCII-ART");
+    check("voie terminal + QR dispo -> le reste du résultat est conservé", withQr.message === "procédure terminal…");
+    check("voie terminal + QR dispo -> pas de hint d'attente", withQr.qrHint === undefined);
+
+    const withoutQr = attachQrArt(terminalResult, null);
+    check("voie terminal, QR pas encore dispo -> qrArt null", withoutQr.qrArt === null);
+    check(
+      "voie terminal, QR pas encore dispo -> hint « réessaie dans un instant »",
+      /réessaie/i.test(withoutQr.qrHint || "")
+    );
+
+    const elicitationResult = { route: "elicitation", pairingCode: "ABCD-1234", message: "Code : ABCD-1234" };
+    const untouched = attachQrArt(elicitationResult, "QR-ASCII-ART");
+    check("voie élicitation (code obtenu) -> jamais de qrArt ajouté", !("qrArt" in untouched));
+    check("voie élicitation (code obtenu) -> résultat inchangé", untouched === elicitationResult || untouched.pairingCode === "ABCD-1234");
   }
 } catch (e) {
   console.error("Erreur test:", e);
