@@ -43,6 +43,10 @@ try {
   {
     let spawnCalls = 0;
     let pingCalls = 0;
+    // Non tautologique (revue #14) : on ENREGISTRE la valeur de pingCalls AU MOMENT
+    // du spawn, pas seulement son compte final (qui serait >= 1 même si le spawn
+    // avait lieu AVANT tout ping — ce que le test doit justement exclure).
+    let pingCallsAtSpawn = null;
     const res = await ensureDaemonRunning({
       socketPath: "/fake.sock",
       secret: "s",
@@ -55,6 +59,7 @@ try {
       },
       spawnFn: () => {
         spawnCalls += 1;
+        pingCallsAtSpawn = pingCalls;
         return { pid: 456, unref: () => {} };
       },
       sleep: async () => {},
@@ -62,7 +67,10 @@ try {
       pollIntervalMs: 0,
     });
     check("démon absent au premier ping -> spawn appelé EXACTEMENT une fois", spawnCalls === 1);
-    check("le ping a bien lieu AVANT le spawn (jamais un spawn à l'aveugle)", pingCalls >= 1);
+    check(
+      "le spawn survient après EXACTEMENT un ping (jamais un spawn à l'aveugle)",
+      pingCallsAtSpawn === 1
+    );
     check("polling jusqu'à réponse -> started:true, pid rapporté", res.started === true && res.pid === 456);
   }
 

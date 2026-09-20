@@ -60,6 +60,12 @@ try {
   check("le 2e démon sur le même verrou SORT en échec (exit != 0)", second.status !== 0 && second.status !== null);
   check("le premier démon tourne toujours (le 2e ne l'a pas perturbé)", !firstExited);
 
+  // Bonus (revue) : le stderr du perdant NOMME le conflit de verrou, pas seulement
+  // un code de sortie non-zéro — un exit != 0 pourrait tout aussi bien venir d'un
+  // crash sans rapport (Baileys, config...).
+  const secondStderr = second.stderr?.toString("utf8") || "";
+  check("le stderr du 2e démon mentionne le conflit de verrou (PID détenteur)", /auth\//.test(secondStderr) && /PID/.test(secondStderr));
+
   first.kill();
   await waitFor(() => firstExited, { timeoutMs: 3000 }).catch(() => {});
 
