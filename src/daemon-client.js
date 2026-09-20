@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import { spawn as spawnDefault } from "node:child_process";
 
 // Envoie une requête NDJSON et attend UNE ligne de réponse. Résout `null` si personne
@@ -31,8 +32,11 @@ export function request(socketPath, req, { timeoutMs = 2000 } = {}) {
     socket.once("error", () => finish(null));
     socket.once("connect", () => socket.write(JSON.stringify(req) + "\n"));
     let buf = "";
+    // StringDecoder (fix #7) : un caractère UTF-8 multi-octets coupé entre deux
+    // chunks ne doit pas être corrompu par un .toString("utf8") appliqué par chunk.
+    const decoder = new StringDecoder("utf8");
     socket.on("data", (chunk) => {
-      buf += chunk.toString("utf8");
+      buf += decoder.write(chunk);
       const idx = buf.indexOf("\n");
       if (idx === -1) return;
       try {
@@ -78,6 +82,10 @@ export async function ensureDaemonRunning({
 
   appendLog(logFile, "ping sans réponse : spawn du démon (détaché).");
   const child = spawnFn(process.execPath, [daemonScript], { detached: true, stdio: "ignore" });
+  // Un spawn peut échouer de façon ASYNCHRONE (binaire introuvable, permissions...)
+  // bien après l'appel — sans ce handler, ça devient une exception non catchée au
+  // lieu d'un simple signal absorbé par le polling borné qui suit (fix #9).
+  child.on?.("error", (e) => appendLog(logFile, `spawn erreur: ${e?.message}`));
   child.unref?.();
 
   for (let attempt = 0; attempt < pollAttempts; attempt++) {
