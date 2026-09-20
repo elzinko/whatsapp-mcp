@@ -18,4 +18,7 @@ async function main() {
   process.exit(res.ok ? 0 : 1);
 }
 
-main();
+main().catch((e) => {
+  console.error("Statut indisponible:", e?.message);
+  process.exit(1);
+});
