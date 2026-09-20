@@ -29,10 +29,13 @@ function tmpdir() {
   const file = path.join(dir, "sub", "daemon.secret"); // sous-dossier créé au passage
   const secret = readOrCreateSecret(file);
   check("absent -> secret 64 hex", /^[0-9a-f]{64}$/.test(secret));
-  check("absent -> fichier écrit", fs.existsSync(file));
+  // Pas de existsSync-puis-statSync (motif check-then-use = faux positif TOCTOU
+  // CodeQL) : readFileSync/statSync lèvent si le fichier manque, ce qui prouve
+  // l'écriture. La lecture précède le stat (pas de « check » avant « use »).
+  const written = fs.readFileSync(file, "utf8").trim();
+  check("absent -> contenu == valeur renvoyée (fichier bien écrit)", written === secret);
   const mode = fs.statSync(file).mode & 0o777;
   check(`absent -> fichier en 0600 (obtenu ${mode.toString(8)})`, mode === 0o600);
-  check("absent -> contenu == valeur renvoyée", fs.readFileSync(file, "utf8").trim() === secret);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
