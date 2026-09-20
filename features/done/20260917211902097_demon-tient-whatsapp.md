@@ -5,9 +5,9 @@ type: feature
 priority: P2
 version: 0.3.0
 epic: "0005"
-status: ready
+status: shipped
 ready: 2026-09-18
-pr:
+pr: "#44"
 created: 2026-09-17
 ---
 
@@ -16,7 +16,7 @@ l'unique connexion WhatsApp autorisée : le dernier gagne, les autres tombent (e
 Cette fiche sort WhatsApp des clients. Un seul processus — le démon — tient la connexion, la
 capture et l'archive. Il expose une petite socket locale. Les clients ne parleront plus jamais
 à WhatsApp : ils parleront au démon (fiche frontend). C'est le socle de l'épic
-[0005](0005-demon-frontends-mcp.md) : rien d'autre ne tient sans lui.
+[0005](../0005-demon-frontends-mcp.md) : rien d'autre ne tient sans lui.
 
 ## Contexte / Problème
 
@@ -27,7 +27,7 @@ retiraient en 440.
 Deux limites structurelles :
 
 - **Le verrou est un pansement.** Le verrou exclusif sur `auth/`
-  ([fiche 0009](done/0009-verrou-exclusif-auth.md)) empêche la collision en **refusant** le 2ᵉ
+  ([fiche 0009](0009-verrou-exclusif-auth.md)) empêche la collision en **refusant** le 2ᵉ
   process. Il gère la panne, il ne donne pas le multi-clients. Un démon la supprime autrement :
   il n'y a **qu'un** process légitime, par nature.
 - **La capture meurt avec le dernier client.** Aujourd'hui, fermer tous les serveurs coupe
@@ -88,19 +88,19 @@ anti-parasite, pas une authentification** — et l'ADR doit l'écrire tel quel (
   milieu · le **patron *ensure-broker-running*** (ping → spawn détaché → polling borné → log en
   append ; nom de symbole à adapter, pas importé verbatim) · NDJSON loopback deux verbes ·
   policy évaluée en process séparé avec « non classifiable = refus ».
-- **À ne pas reprendre** : le bind TCP comme singleton (cf. [0009](done/0009-verrou-exclusif-auth.md)) ·
+- **À ne pas reprendre** : le bind TCP comme singleton (cf. [0009](0009-verrou-exclusif-auth.md)) ·
   le threading libre — une socket WhatsApp unique exige **une file + un worker unique**, là où
   le broker google est sans état.
 - **À écrire de zéro** : la machine à états d'une session WhatsApp longue. Le broker google est
   sans état, il n'y a rien à copier là.
 - **Frontière de sécurité (à graver dans l'ADR).** Le secret de la socket borne *qui* parle au
   démon : des process locaux que l'humain a lancés. Il n'authentifie personne. Le geste humain
-  (Touch ID, côté frontend, [ADR-0003](../docs/adr/0003-consentement-par-presence-touch-id.md))
+  (Touch ID, côté frontend, [ADR-0003](../../docs/adr/0003-consentement-par-presence-touch-id.md))
   ouvre un périmètre ; le démon fait confiance à un frontend authentifié-par-secret. C'est de la
   **sûreté**, pas de la **sécurité** — cohérent avec le threat-model du projet (données propres,
   lecture seule, machine mono-utilisateur coopérative). La vraie frontière reste **le doigt + le
-  plafond** ([ADR-0002](../docs/adr/0002-le-plafond-et-le-consentement.md)).
-- Le verrou [0009](done/0009-verrou-exclusif-auth.md) devient soit inutile (un seul démon par
+  plafond** ([ADR-0002](../../docs/adr/0002-le-plafond-et-le-consentement.md)).
+- Le verrou [0009](0009-verrou-exclusif-auth.md) devient soit inutile (un seul démon par
   nature), soit re-ciblé sur « un seul démon » — à trancher à l'implémentation.
-- Le registre de sessions ([fiche 20260902223310499](done/20260902223310499_droits-par-session-jeton-porte.md))
+- Le registre de sessions ([fiche 20260902223310499](20260902223310499_droits-par-session-jeton-porte.md))
   est conçu pour migrer tel quel.
