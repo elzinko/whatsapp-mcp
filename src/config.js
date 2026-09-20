@@ -1,7 +1,9 @@
 // Chargement de la configuration depuis l'environnement + un éventuel fichier .env.
 // Volontairement sans dépendance (pas de dotenv) pour garder le projet léger.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -98,12 +100,40 @@ const sessionTtlMs = (() => {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_TTL_MS;
 })();
 
-// Le démon (ADR-0008) : socket Unix, secret partagé local, log d'audit. Même
-// convention que sessionsDir/authLockFile — dérivés du projectRoot (le « state root »
-// de ce serveur), surchargeables par variable d'environnement.
+// Le démon (ADR-0008) : socket Unix, secret partagé local, log d'audit.
+//
+// daemonSecretFile/daemonLogFile restent dérivés du projectRoot (fichiers normaux,
+// aucune limite de longueur), comme sessionsDir/authLockFile.
+//
+// daemonSocket, lui, NE PEUT PAS suivre la même règle (revue correctness #1) : un
+// chemin Unix socket est limité à ~104 octets (`sun_path`, macOS). Un worktree
+// profond (ex. .claude/worktrees/<nom-long>/daemon.sock) dépasse déjà cette limite
+// à lui seul — `bind` tronque alors le chemin en silence, et les `chmod`/`unlink`
+// suivants, qui visent le chemin COMPLET, échouent en ENOENT au démarrage du démon.
+// Le défaut route donc vers un dossier runtime COURT et STABLE par projet
+// (os.tmpdir(), un nom dérivé du hash du projectRoot) — démon et client, tant
+// qu'ils importent ce même config.js, calculent le même chemin sans coordination.
+const MAX_SOCKET_PATH_BYTES = 104;
+
+function defaultDaemonSocket() {
+  const hash = crypto.createHash("sha1").update(projectRoot).digest("hex").slice(0, 12);
+  return path.join(os.tmpdir(), `whatsapp-mcp-${hash}.sock`);
+}
+
 const daemonSocket = process.env.WHATSAPP_DAEMON_SOCKET
   ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SOCKET)
-  : path.join(projectRoot, "daemon.sock");
+  : defaultDaemonSocket();
+
+// Garde-fou : si malgré tout (tmpdir anormalement long, ou surcharge env explicite)
+// le chemin résolu dépasse la limite, on échoue TÔT avec un message clair plutôt que
+// de laisser le démon crasher plus tard, obscurément, sur bind/chmod/unlink.
+const daemonSocketBytes = Buffer.byteLength(daemonSocket, "utf8");
+if (daemonSocketBytes >= MAX_SOCKET_PATH_BYTES) {
+  throw new Error(
+    `Chemin de socket démon trop long (${daemonSocketBytes} octets >= ${MAX_SOCKET_PATH_BYTES}) : ` +
+      `${daemonSocket}. Fixe WHATSAPP_DAEMON_SOCKET vers un chemin plus court.`
+  );
+}
 
 const daemonSecretFile = process.env.WHATSAPP_DAEMON_SECRET_FILE
   ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SECRET_FILE)
