@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { Settings } from "./settings.js";
 import { Allowlist } from "./allowlist.js";
-import { Profiles } from "./profiles.js";
 import { WhatsAppClient, log } from "./whatsapp.js";
 import { SessionRegistry } from "./sessions.js";
 import { handleRequest } from "./daemon-protocol.js";
@@ -196,9 +195,15 @@ function testFakeDeps() {
 export async function main() {
   const settings = new Settings(config.settingsFile).load();
   const allowlist = new Allowlist(config.allowlistFile).bootstrap(settings);
-  const profile = new Profiles(config.profilesFile).load();
   const deps = process.env[FAKE_BAILEYS_ENV] === "1" ? testFakeDeps() : undefined;
-  const wa = new WhatsAppClient(config, settings, allowlist, profile, deps);
+  // Le démon est PARTAGÉ par tous les frontends/projets (revue Codex #3) : il ne doit
+  // PAS appliquer un profil de projet à la capture. Sinon il ne capterait QUE le projet
+  // du frontend qui l'a spawné (ensureDaemonRunning hérite de son env WHATSAPP_PROFILE),
+  // voire rien du tout. Le démon capte donc grant ∩ plafond ; le profil par frontend
+  // s'appliquera à la frontière session/lecture (fiche child B, 20260917211902225).
+  // profile:"" + stub inerte (4e arg null) => _profileHas toujours vrai, sans jamais
+  // appeler match() (le stub inerte n'en a pas).
+  const wa = new WhatsAppClient({ ...config, profile: "" }, settings, allowlist, null, deps);
   const sessions = new SessionRegistry(config.sessionsDir, { defaultTtlMs: config.sessionTtlMs });
 
   // Verrou `auth/` AVANT tout (fiche 0009, partagé avec src/index.js). Un second
