@@ -44,8 +44,26 @@ export function readOrCreateSecret(file) {
     if (e.code !== "EEXIST") throw e;
     // Un autre process a gagné la création entre notre tryRead et notre link : on lit
     // SA valeur (la nôtre est jetée). `file` est complet (link post-écriture), donc
-    // tryRead ne tombe pas sur un fichier vide.
-    return tryRead(file) || secret;
+    // tryRead ne tombe pas sur un fichier vide — SAUF si `file` est un résidu VIDE
+    // (créé/tronqué par un tiers, jamais par ce module) : `tryRead` le voit "absent",
+    // et sans ce garde-fou `link` échoue en EEXIST pour toujours sans jamais rien
+    // persister — démon et client divergeraient, refus muet permanent (revue #3).
+    const rescued = tryRead(file);
+    if (rescued) return rescued;
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* déjà retiré entre-temps, tant mieux */
+    }
+    try {
+      // UNE seule retentative, bornée : si un autre créateur regagne la course ici,
+      // on s'incline et on relit sa valeur, sans jamais boucler.
+      fs.linkSync(tmp, file);
+      return secret;
+    } catch (e2) {
+      if (e2.code !== "EEXIST") throw e2;
+      return tryRead(file) || secret;
+    }
   } finally {
     // En cas de succès, `file` garde l'inode partagé (hard link) ; en cas d'EEXIST,
     // `tmp` était inutile. Dans les deux cas on retire notre `tmp`.
