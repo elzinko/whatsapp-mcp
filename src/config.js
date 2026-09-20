@@ -1,7 +1,9 @@
 // Chargement de la configuration depuis l'environnement + un éventuel fichier .env.
 // Volontairement sans dépendance (pas de dotenv) pour garder le projet léger.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -98,6 +100,58 @@ const sessionTtlMs = (() => {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_TTL_MS;
 })();
 
+// Le démon (ADR-0008) : socket Unix, secret partagé local, log d'audit. Ces trois
+// chemins vivent au STATE ROOT STABLE, PAS dans projectRoot (revue Codex #4). En
+// déploiement versionné (ADR-0007), projectRoot est le dossier de LA VERSION FIGÉE,
+// qui change à chaque `deploy`. Le verrou auth/ — le singleton du démon — vit, lui, au
+// state root stable (via WHATSAPP_AUTH_DIR posé par bin/whatsapp-mcp). Si socket/secret
+// suivaient projectRoot, après un switch de version le nouveau frontend viserait un
+// nouveau chemin de socket, spawnerait un 2e démon qui mourrait sur le verrou partagé
+// tenu par l'ancien, et le polling échouerait jusqu'à tuer l'ancien à la main. On dérive
+// donc du state root = dirname(authDir) : il suit WHATSAPP_AUTH_DIR (stable inter-versions)
+// et vaut projectRoot en dev (aucun shim). Démon et client calculent le même chemin tant
+// qu'ils importent ce config.js.
+const stateRoot = path.dirname(authDir);
+
+// Secret et log : fichiers normaux (aucune limite de longueur), au state root stable —
+// sinon un frontend d'une nouvelle version lirait un secret différent de celui du démon
+// en cours, et toutes les requêtes seraient refusées (secrets divergents).
+const daemonSecretFile = process.env.WHATSAPP_DAEMON_SECRET_FILE
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SECRET_FILE)
+  : path.join(stateRoot, "daemon.secret");
+
+const daemonLogFile = process.env.WHATSAPP_DAEMON_LOG_FILE
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_LOG_FILE)
+  : path.join(stateRoot, "daemon.log");
+
+// La socket Unix est limitée à ~104 octets (`sun_path`, macOS). Au state root elle est
+// courte (ex. ~/.config/whatsapp-mcp/daemon.sock ≈ 47 octets) ET stable. Repli seulement
+// si le state root lui-même est trop profond (worktree de dev à chemin long) : un dossier
+// runtime court, keyé sur le hash DU STATE ROOT (jamais du projectRoot — sinon deux
+// versions ne partageraient pas le même démon).
+const MAX_SOCKET_PATH_BYTES = 104;
+
+function defaultDaemonSocket() {
+  const atStateRoot = path.join(stateRoot, "daemon.sock");
+  if (Buffer.byteLength(atStateRoot, "utf8") < MAX_SOCKET_PATH_BYTES) return atStateRoot;
+  const hash = crypto.createHash("sha1").update(stateRoot).digest("hex").slice(0, 12);
+  return path.join(os.tmpdir(), `whatsapp-mcp-${hash}.sock`);
+}
+
+const daemonSocket = process.env.WHATSAPP_DAEMON_SOCKET
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SOCKET)
+  : defaultDaemonSocket();
+
+// Garde-fou : chemin résolu trop long (surcharge env explicite, ou tmpdir anormal) ->
+// on échoue TÔT avec un message clair plutôt que de crasher plus tard sur bind/chmod.
+const daemonSocketBytes = Buffer.byteLength(daemonSocket, "utf8");
+if (daemonSocketBytes >= MAX_SOCKET_PATH_BYTES) {
+  throw new Error(
+    `Chemin de socket démon trop long (${daemonSocketBytes} octets >= ${MAX_SOCKET_PATH_BYTES}) : ` +
+      `${daemonSocket}. Fixe WHATSAPP_DAEMON_SOCKET vers un chemin plus court.`
+  );
+}
+
 export const config = {
   projectRoot,
   // Version servie (ADR-0007) : lue dans le fichier VERSION de la copie figée, « dev »
@@ -126,6 +180,9 @@ export const config = {
   strongAuthFile,
   sessionsDir,
   sessionTtlMs,
+  daemonSocket,
+  daemonSecretFile,
+  daemonLogFile,
 };
 
 // Un JID de groupe WhatsApp se termine toujours par "@g.us".

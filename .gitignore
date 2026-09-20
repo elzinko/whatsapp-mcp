@@ -34,6 +34,12 @@ strong-auth-*.json
 sessions/
 sessions-*/
 
+# Le démon (ADR-0008) : socket Unix, secret partagé local -> jamais commités
+daemon.sock
+daemon-*.sock
+daemon.secret
+daemon-*.secret
+
 # Logs
 *.log
 
