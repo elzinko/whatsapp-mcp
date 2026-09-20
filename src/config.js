@@ -98,6 +98,21 @@ const sessionTtlMs = (() => {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_TTL_MS;
 })();
 
+// Le démon (ADR-0008) : socket Unix, secret partagé local, log d'audit. Même
+// convention que sessionsDir/authLockFile — dérivés du projectRoot (le « state root »
+// de ce serveur), surchargeables par variable d'environnement.
+const daemonSocket = process.env.WHATSAPP_DAEMON_SOCKET
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SOCKET)
+  : path.join(projectRoot, "daemon.sock");
+
+const daemonSecretFile = process.env.WHATSAPP_DAEMON_SECRET_FILE
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_SECRET_FILE)
+  : path.join(projectRoot, "daemon.secret");
+
+const daemonLogFile = process.env.WHATSAPP_DAEMON_LOG_FILE
+  ? path.resolve(projectRoot, process.env.WHATSAPP_DAEMON_LOG_FILE)
+  : path.join(projectRoot, "daemon.log");
+
 export const config = {
   projectRoot,
   // Version servie (ADR-0007) : lue dans le fichier VERSION de la copie figée, « dev »
@@ -126,6 +141,9 @@ export const config = {
   strongAuthFile,
   sessionsDir,
   sessionTtlMs,
+  daemonSocket,
+  daemonSecretFile,
+  daemonLogFile,
 };
 
 // Un JID de groupe WhatsApp se termine toujours par "@g.us".

@@ -22,7 +22,7 @@
     "deploy:list": "bash scripts/deploy-local.sh --list",
     "deploy:revert": "bash scripts/deploy-local.sh --revert",
     "sessions": "node scripts/sessions.js",
-    "test": "node test/reconnect-plan.js && node test/store-persistence.js && node test/grants.js && node test/consent-provenance.js && node test/allowlist.js && node test/profiles.js && node test/elicitation.js && node test/touchid.js && node test/strongauth.js && node test/consent-strongauth.js && node test/setup.js && node test/sessions.js && node test/mcp-smoke.js && node test/help.js && node test/recent-messages.js && node test/authlock.js && node test/deploy-shim.js && node test/deploy-local.js && node test/pairing.js && node test/pairing-socket.js",
+    "test": "node test/reconnect-plan.js && node test/store-persistence.js && node test/grants.js && node test/consent-provenance.js && node test/allowlist.js && node test/profiles.js && node test/elicitation.js && node test/touchid.js && node test/strongauth.js && node test/consent-strongauth.js && node test/setup.js && node test/sessions.js && node test/mcp-smoke.js && node test/help.js && node test/recent-messages.js && node test/authlock.js && node test/deploy-shim.js && node test/deploy-local.js && node test/pairing.js && node test/pairing-socket.js && node test/daemon-protocol.js && node test/daemon-socket.js && node test/daemon-singleton.js && node test/daemon-ensure.js",
     "test:setup": "node test/setup.js",
     "test:authlock": "node test/authlock.js",
     "test:allowlist": "node test/allowlist.js",
@@ -41,7 +41,11 @@
     "test:deploy-shim": "node test/deploy-shim.js",
     "test:deploy-local": "node test/deploy-local.js",
     "test:pairing": "node test/pairing.js",
-    "test:pairing-socket": "node test/pairing-socket.js"
+    "test:pairing-socket": "node test/pairing-socket.js",
+    "test:daemon-protocol": "node test/daemon-protocol.js",
+    "test:daemon-socket": "node test/daemon-socket.js",
+    "test:daemon-singleton": "node test/daemon-singleton.js",
+    "test:daemon-ensure": "node test/daemon-ensure.js"
   },
   "engines": {
     "node": ">=20"
