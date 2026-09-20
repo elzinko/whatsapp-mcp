@@ -86,6 +86,21 @@ function tmpdir() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// 5. Fichier existant mais VIDE (résidu stale, jamais persisté) -> auto-réparation :
+//    unlink + une seule retentative, converge vers une valeur RÉELLEMENT persistée
+//    (fix #3 : sans ça, link() échoue EEXIST pour toujours sans rien écrire).
+{
+  const dir = tmpdir();
+  const file = path.join(dir, "daemon.secret");
+  fs.writeFileSync(file, "", { mode: 0o600 }); // résidu vide, PAS écrit par ce module
+  const secret = readOrCreateSecret(file);
+  check("secret vide -> auto-réparé en secret 64 hex", /^[0-9a-f]{64}$/.test(secret));
+  check("secret vide -> réparé -> persisté sur disque", fs.readFileSync(file, "utf8").trim() === secret);
+  const again = readOrCreateSecret(file);
+  check("secret vide -> réparé -> idempotent ensuite", again === secret);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 if (failed) {
   console.log("=== RÉSULTAT: ÉCHEC ===");
   process.exit(1);
