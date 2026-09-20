@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { config } from "./config.js";
@@ -30,15 +31,16 @@ import { readOrCreateSecret } from "./daemon-secret.js";
 const MAX_LINE_BYTES = 1 << 20;
 
 // Une ligne d'audit par refus de secret (ADR-0008 §5 : "le refus est journalisé").
-// Best-effort : un audit qu'on n'arrive pas à écrire ne doit jamais faire tomber le
-// démon, mais on le signale sur stderr pour ne pas échouer en silence.
+// ASYNCHRONE et best-effort (revue #8) : un refus de secret peut survenir à haute
+// fréquence sur le hot path (un parasite qui martèle la socket) — bloquer la boucle
+// d'événements avec un appendFileSync à CHAQUE refus serait une porte de déni de
+// service. Le dossier du log est créé UNE FOIS, à l'appel de serveDaemon (pas ici,
+// pas de mkdirSync récursif par appel). Une erreur d'écriture n'a jamais fait tomber
+// le démon ; elle est simplement signalée sur stderr, jamais avalée en silence.
 export function appendAudit(logFile, entry) {
-  try {
-    fs.mkdirSync(path.dirname(logFile), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(logFile, JSON.stringify(entry) + "\n", { mode: 0o600 });
-  } catch (e) {
-    log("Audit non journalisé (I/O) :", e?.message);
-  }
+  fs.appendFile(logFile, JSON.stringify(entry) + "\n", { mode: 0o600 }, (e) => {
+    if (e) log("Audit non journalisé (I/O) :", e?.message);
+  });
 }
 
 // Backend RÉEL du protocole (ADR-0008 action 1/5) : héberge le SessionRegistry
@@ -56,8 +58,14 @@ export function buildBackend(wa, sessions) {
     // DANS cette session (pas seulement autorisé ailleurs) ET dans le grant ∩ plafond
     // couru par recentFor (whatsapp.js#_inScope, ADR-0002 §6).
     recent(token, jid, limit) {
+      wa.allowlist.refresh(); // fraîcheur AVANT les vérifs _inScope (comme index.js:379)
       const session = sessions.resolve(token);
       if (!session) throw new Error("Session invalide, expirée ou fermée. Ouvre une session avec session_open.");
+      // NOTE (finding #6, décision de contrat SKIPPED volontairement) : le démon
+      // attend un JID exact dans `jid`, pas un nom de groupe — la résolution nom->JID
+      // (wa._resolveToJid) reste du ressort du frontend (fiche child B,
+      // 20260917211902225). Refuser ici un nom serait un changement de comportement
+      // hors scope de cette fiche.
       const targetJid = jid || (session.channels.length === 1 ? session.channels[0] : null);
       if (!targetJid) throw new Error("Plusieurs canaux dans cette session : précise 'jid'.");
       if (!session.channels.includes(targetJid)) {
@@ -69,12 +77,17 @@ export function buildBackend(wa, sessions) {
     // être à la fois autorisé (settings.has, un grant existant) ET dans le plafond ∩
     // profil actif (wa._inScope) — même garde que l'ingestion (whatsapp.js#_ingest).
     sessionOpen(channels, ttlMs) {
+      wa.allowlist.refresh(); // fraîcheur AVANT les vérifs _inScope (comme index.js:379)
       const jids = (channels || []).map((c) => wa._resolveToJid(c));
       const denied = jids.filter((jid) => !(wa.settings.has(jid) && wa._inScope(jid)));
       if (denied.length > 0) {
         throw new Error(`Canal hors grants ∩ plafond, refusé : ${denied.join(", ")}.`);
       }
-      const session = sessions.create(jids, ttlMs);
+      // Coercition comme index.js:393 : un ttlMs non entier ou <= 0 (chaîne, négatif,
+      // absent) retombe sur le défaut du registre plutôt que de créer une session déjà
+      // expirée, ou de faire lever un RangeError plus loin (Date invalide).
+      const ttl = Number.isInteger(ttlMs) && ttlMs > 0 ? ttlMs : undefined;
+      const session = sessions.create(jids, ttl);
       return { session: session.id, expiresAt: session.expiresAt, channels: session.channels };
     },
     sessionClose(token) {
@@ -94,6 +107,8 @@ export function serveDaemon(backend, { socketPath, secret, logFile }) {
     if (e.code !== "ENOENT") throw e; // un vrai fichier bloquant : on ne l'écrase pas en silence
   }
   fs.mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 });
+  // Dossier du log d'audit créé UNE FOIS ici (fix #8) — pas à chaque appendAudit().
+  fs.mkdirSync(path.dirname(logFile), { recursive: true, mode: 0o700 });
 
   async function handleLine(conn, line) {
     let req;
@@ -112,17 +127,15 @@ export function serveDaemon(backend, { socketPath, secret, logFile }) {
 
   const server = net.createServer((conn) => {
     let buf = "";
+    // Un caractère multi-octets (UTF-8) peut être coupé entre deux chunks TCP/Unix ;
+    // StringDecoder recolle les octets incomplets au chunk suivant au lieu de
+    // corrompre le caractère (fix #7) — un .toString("utf8") par chunk ne le fait pas.
+    const decoder = new StringDecoder("utf8");
     conn.on("data", (chunk) => {
-      buf += chunk.toString("utf8");
-      // Cap anti-flux-anormal (revue P2) : au-delà de MAX_LINE_BYTES sans '\n', on
-      // refuse et on coupe — pas de buffer non borné.
-      if (buf.length > MAX_LINE_BYTES) {
-        try {
-          conn.write(JSON.stringify({ ok: false, verb: null, error: "ligne trop longue" }) + "\n");
-        } catch { /* connexion déjà partie */ }
-        conn.destroy();
-        return;
-      }
+      buf += decoder.write(chunk);
+      // Draine D'ABORD toutes les lignes complètes déjà reçues (fix #5) : un lot de
+      // petites requêtes valides, dont la taille CUMULÉE dépasse MAX_LINE_BYTES,
+      // n'est jamais rejeté — seul un reste NON TERMINÉ (sans '\n') trop long l'est.
       let idx;
       while ((idx = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, idx).trim();
@@ -136,6 +149,14 @@ export function serveDaemon(backend, { socketPath, secret, logFile }) {
             } catch { /* connexion déjà partie */ }
           });
         }
+      }
+      // Cap anti-flux-anormal (revue P2) : au-delà de MAX_LINE_BYTES SANS '\n' dans ce
+      // qu'il reste à drainer, on refuse et on coupe — pas de buffer non borné.
+      if (buf.length > MAX_LINE_BYTES) {
+        try {
+          conn.write(JSON.stringify({ ok: false, verb: null, error: "ligne trop longue" }) + "\n");
+        } catch { /* connexion déjà partie */ }
+        conn.destroy();
       }
     });
     conn.on("error", () => {}); // client parti brutalement : rien à faire côté démon
