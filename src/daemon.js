@@ -24,6 +24,11 @@ import { SessionRegistry } from "./sessions.js";
 import { handleRequest } from "./daemon-protocol.js";
 import { readOrCreateSecret } from "./daemon-secret.js";
 
+// Cap d'une ligne de requête NDJSON (revue P2) : une requête status/recent tient très
+// largement sous 1 MiB. Au-delà sans '\n', on refuse et on coupe plutôt que de laisser
+// le buffer par-connexion gonfler sans borne.
+const MAX_LINE_BYTES = 1 << 20;
+
 // Une ligne d'audit par refus de secret (ADR-0008 §5 : "le refus est journalisé").
 // Best-effort : un audit qu'on n'arrive pas à écrire ne doit jamais faire tomber le
 // démon, mais on le signale sur stderr pour ne pas échouer en silence.
@@ -109,11 +114,28 @@ export function serveDaemon(backend, { socketPath, secret, logFile }) {
     let buf = "";
     conn.on("data", (chunk) => {
       buf += chunk.toString("utf8");
+      // Cap anti-flux-anormal (revue P2) : au-delà de MAX_LINE_BYTES sans '\n', on
+      // refuse et on coupe — pas de buffer non borné.
+      if (buf.length > MAX_LINE_BYTES) {
+        try {
+          conn.write(JSON.stringify({ ok: false, verb: null, error: "ligne trop longue" }) + "\n");
+        } catch { /* connexion déjà partie */ }
+        conn.destroy();
+        return;
+      }
       let idx;
       while ((idx = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, idx).trim();
         buf = buf.slice(idx + 1);
-        if (line) handleLine(conn, line);
+        // .catch : une exception inattendue HORS dispatch (le protocole avale déjà les
+        // erreurs métier) ne doit jamais devenir une unhandled rejection (revue P2).
+        if (line) {
+          handleLine(conn, line).catch(() => {
+            try {
+              conn.write(JSON.stringify({ ok: false, verb: null, error: "erreur interne" }) + "\n");
+            } catch { /* connexion déjà partie */ }
+          });
+        }
       }
     });
     conn.on("error", () => {}); // client parti brutalement : rien à faire côté démon

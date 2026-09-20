@@ -9,7 +9,8 @@
 // Read-or-create : le premier process (démon ou client, peu importe l'ordre de
 // démarrage) qui ne trouve pas le fichier le génère, l'écrit en 0600, et toute
 // lecture ultérieure — par n'importe quel process — retrouve la même valeur.
-// Écriture atomique (tmp+rename), comme sessions.js/settings.js.
+// Création ATOMIQUE par lien (link + EEXIST), race-free même à froid — voir
+// readOrCreateSecret (revue P1 : rename écrasait et deux créateurs pouvaient diverger).
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -28,22 +29,30 @@ export function readOrCreateSecret(file) {
   const existing = tryRead(file);
   if (existing) return existing;
 
-  const secret = crypto.randomBytes(32).toString("hex");
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const secret = crypto.randomBytes(32).toString("hex");
   const tmp = `${file}.tmp.${process.pid}.${crypto.randomBytes(4).toString("hex")}`;
   fs.writeFileSync(tmp, secret, { mode: 0o600 });
   try {
-    fs.renameSync(tmp, file);
+    // link() est ATOMIQUE et échoue (EEXIST) si `file` existe déjà — au contraire de
+    // rename qui ÉCRASE. Un seul créateur gagne ; les autres lisent SA valeur. `file`
+    // n'apparaît qu'une fois `tmp` entièrement écrit : jamais de fenêtre « fichier
+    // vide ». Ça ferme la course de création à froid (revue P1).
+    fs.linkSync(tmp, file);
+    return secret;
   } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+    // Un autre process a gagné la création entre notre tryRead et notre link : on lit
+    // SA valeur (la nôtre est jetée). `file` est complet (link post-écriture), donc
+    // tryRead ne tombe pas sur un fichier vide.
+    return tryRead(file) || secret;
+  } finally {
+    // En cas de succès, `file` garde l'inode partagé (hard link) ; en cas d'EEXIST,
+    // `tmp` était inutile. Dans les deux cas on retire notre `tmp`.
     try {
       fs.unlinkSync(tmp);
     } catch {
-      /* déjà absent */
+      /* déjà retiré */
     }
-    throw e;
   }
-  // Sous course (deux process créent en même temps), rename ÉCRASE : on relit ce qui
-  // est effectivement sur disque après coup, pour que tout le monde converge vers LA
-  // MÊME valeur — jamais celle qu'on vient d'écrire si un autre a écrit après nous.
-  return tryRead(file) || secret;
 }

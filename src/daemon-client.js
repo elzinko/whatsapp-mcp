@@ -54,9 +54,11 @@ function appendLog(logFile, line) {
 }
 
 // ping -> si personne ne répond, spawn DÉTACHÉ (le démon survit à ce process) ->
-// polling borné jusqu'à réponse -> log en append. N'appelle jamais spawnFn deux fois :
-// c'est ce qui garantit "jamais deux démons" côté client (le verrou côté démon est la
-// seconde ligne de défense, cf. authlock.js).
+// polling borné jusqu'à réponse -> log en append. DANS UN MÊME APPEL, spawnFn n'est
+// appelé qu'une fois. Mais deux appelants CONCURRENTS à froid peuvent chacun spawner :
+// la garantie « un seul démon » vient alors du VERROU côté démon (authlock.js), qui
+// fait sortir le perdant en exit(1) sans toucher auth/. Le ping-avant-spawn réduit les
+// spawns inutiles, il ne remplace pas le verrou (revue P2, ADR-0008 §4).
 export async function ensureDaemonRunning({
   socketPath,
   secret,
