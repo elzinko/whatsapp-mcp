@@ -1,7 +1,7 @@
 # ADR-0008 : Le démon unique — un process tient WhatsApp, derrière une socket locale
 
-**Statut :** Proposé
-**Date :** 2026-09-19
+**Statut :** Accepté
+**Date :** 2026-09-19 (accepté le 2026-09-20)
 **Décideurs :** Thomas (propriétaire du projet et du compte WhatsApp)
 **Amende :** compose ADR-0002 (plafond/consentement), ADR-0003 (Touch ID), ADR-0004 (sessions) —
 il déplace *où* ces règles s'appliquent, il ne les change pas
