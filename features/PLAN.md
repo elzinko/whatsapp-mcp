@@ -1,7 +1,8 @@
 # Plan — whatsapp-mcp
 
 > Séquence **décidée** (curée, pas générée). **Décidé le 2026-09-11**, mis à jour le
-> **2026-09-18** (découpage de l'épic 0005), **2026-09-20** (démon livré #44). Le gate `ready` prime pour
+> **2026-09-18** (découpage de l'épic 0005), **2026-09-20** (démon livré #44),
+> **2026-09-25** (revue de validité : 0006 clôturée superseded, 0002 → P3). Le gate `ready` prime pour
 > *tirer maintenant* ; ce plan prime pour *décider la suite*.
 > Index du backlog : [BACKLOG.md](BACKLOG.md).
 
@@ -38,12 +39,14 @@ Puis **la phase 2 — démon + frontends (jalon v0.3.0)**, enfants de l'épic
 - [20260902223310640](20260902223310640_emballage-plugin-cowork-marketplace.md) — emballage
   plugin : différé ; préférer une commande `wire` (extension de `install:client`). Après la
   phase 2.
-- [0006](0006-app-mobile-tokens.md) — app mobile / réseau : **garée très loin** (diverge du
-  local-first de google).
+- ~~[0006](done/0006-app-mobile-tokens.md) — app mobile / réseau~~ — **clôturée le 2026-09-25**
+  (superseded : diverge du local-first de google). Récupérable via git si un consommateur réseau
+  devient réel.
 
 ## Épics — jamais tirés, on tire leurs enfants
 
 - [20260902223310355](20260902223310355_acces-whatsapp-par-session.md) — accès par session
   (**in-progress**) : le fil. Enfants : 0001, 0004 ✓, 0005 (prérequis frère), plugin.
 - [0005](0005-demon-frontends-mcp.md) — démon + frontends (**v0.3.0**), découpé en 3 enfants
-  (cartes 2-4 ci-dessus). [0006](0006-app-mobile-tokens.md) — épic frère (phase 3).
+  (cartes 2-4 ci-dessus). ~~[0006](done/0006-app-mobile-tokens.md)~~ — épic frère (phase 3),
+  **clôturée** (superseded, 2026-09-25).

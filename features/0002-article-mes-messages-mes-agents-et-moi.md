@@ -2,7 +2,7 @@
 id: 0002
 title: "Article : « La question que le LLM ne peut pas trafiquer » (le MCP comme leçon de sécurité vécue)"
 type: feature
-priority: P1
+priority: P3
 version:
 epic:
 status: blocked
@@ -57,6 +57,9 @@ problème → contexte → solution → implémentation — remplace les 6 chapi
   **tenu à jour** au fil du produit (épilogue daté ajouté ce jour : droits par session, profils,
   épic « accès par session »). « Bloquée » = garée volontairement, pas un obstacle. Débloquer
   plus tard = choisir le support puis publier (probablement après le passage du repo en public).
+- **Priorité P1 → P3 le 2026-09-25** (revue de validité) : le contenu est fini et garé, la P1
+  surdimensionnait l'urgence d'une fiche qui attend une simple décision de publication. Reste
+  `blocked` (garée volontairement) — pas un obstacle, une mise en attente.
 - Deux points à trancher au moment de publier :
   1. le repo `whatsapp-mcp` est **privé** → le lien cité dans l'article tombe dans
      le vide tant qu'il ne passe pas public ;
