@@ -4,7 +4,8 @@ title: Durcir la session par un bail de lecture (TTL court + budget), repris de 
 type: feature
 priority: P3
 version:
-epic:
+epic: "20260902223310355"
+evidence: none # durcissement backend du registre de sessions (dans le démon), aucun écran
 status: idea
 ready:
 pr:
@@ -63,5 +64,17 @@ jamais par un geste du LLM (un LLM détourné ne peut rien prolonger).
   `try_consume_read_lease`), PR #149.
 - Hérite du modèle « droits par session » ([ADR-0004](../docs/adr/0004-droits-par-session.md)) et
   s'inscrit sous l'épic accès par session
-  [20260902223310355](20260902223310355_acces-whatsapp-par-session.md) — rattachement à trancher au grooming.
+  [20260902223310355](20260902223310355_acces-whatsapp-par-session.md) — **rattaché à cet épic au
+  grooming du 2026-09-29** (`epic:` posé).
 - Réversible et bon marché : c'est une borne de plus sur un mécanisme existant, pas une refonte.
+
+### Grooming 2026-09-29 (vers la DoR)
+
+Slots pleins : problème (la fenêtre d'abus de 8 h), valeur (durcissement anti-injection), critères
+vérifiables (expiration par le temps **et** refus par épuisement du budget — deux cas testables),
+`evidence: none` (durcissement backend, aucun écran), dépendance externe **datée** (google-mcp
+ADR-0011, accès constaté le 2026-09-20). **Rattachée à l'épic « accès par session »** (`epic:`
+posé). Faisabilité : le registre de sessions vit désormais **dans le démon** (#44) — le bail s'y
+calcule, à câbler avec/après le frontend mince ([20260917211902225](20260917211902225_frontend-mcp-mince.md))
+qui ouvre les sessions via la socket. Reste `idea` (P3, non prioritaire) : le gate `ready` la
+promouvra quand elle sera tirée.

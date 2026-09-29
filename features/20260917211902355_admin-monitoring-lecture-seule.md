@@ -5,6 +5,7 @@ type: feature
 priority: P3
 version: 0.3.0
 epic: "0005"
+evidence: auto # nouvelle console web locale (lecture seule) — capture d'écran décidée au diff de la PR
 status: idea
 ready:
 pr:
@@ -63,3 +64,13 @@ mutant. L'admin regarde ; il ne touche pas.
   journal d'audit, aucun pouvoir) — accès à **reconstater** à l'implémentation.
 - Frontière : l'admin **regarde**. L'authentification, l'autorisation et l'accès vivent dans le
   serveur, pas ici.
+
+### Grooming 2026-09-29 (vers la DoR)
+
+Slots pleins : problème (le démon en fond est une boîte noire), valeur (constater l'état sans
+pouvoir agir), critères vérifiables (page loopback, **GET-only** — mutation refusée, journal
+append-only horodaté), `evidence: auto` (nouvelle console — capture d'écran décidée au diff de la
+PR). **Dépendance** : le démon socle (#44, **interne**, livré) héberge l'admin ; google-mcp n'est
+qu'un **modèle d'inspiration**, pas une dépendance de build (l'admin est écrit de zéro ici) — donc
+pas de ligne « accès constaté » bloquante. Reste `idea`, **optionnelle et en dernier** dans
+l'épic 0005 : à tirer seulement après le frontend mince ([20260917211902225](20260917211902225_frontend-mcp-mince.md)).
