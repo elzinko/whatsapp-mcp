@@ -162,6 +162,14 @@ export function buildBackend(wa, sessions, profiles) {
     revoke(channel) {
       return wa.revokeChannel(channel);
     },
+    // pair(phone) (fiche 20260917211902225) : APPAIRAGE via le démon. Le démon tient Baileys
+    // et le verrou auth/ — une fois le frontend mince, plus aucun process séparé ne peut
+    // appairer (un `npm run pair` sortirait sur le verrou). Le frontend PROPOSE (élicite le
+    // numéro), le démon EXÉCUTE (demande le code d'appairage à WhatsApp) — le serveur ne
+    // s'appaire jamais lui-même (ADR-0005). Le numéro ne transite pas en retour : seul le code.
+    async pair(phone) {
+      return { code: await wa.requestPairingCode(phone) };
+    },
   };
 }
 

@@ -458,16 +458,17 @@ const grantConsent = buildGrantConsent({
   log,
 });
 
-// Flux d'appairage guidé (fiche 20260916130039008). INTERIM (fiche 225) : le verbe
-// d'appairage démon n'est pas encore câblé — la voie 1 (élicitation, code) lève un message
-// clair ; la voie 2 (repli terminal) guide comme avant, sans toucher WhatsApp.
+// Flux d'appairage guidé (fiche 20260916130039008), câblé au DÉMON (fiche 225) : le frontend
+// élicite le numéro (voie 1) ou renvoie la procédure terminal (voie 2) ; le démon EXÉCUTE la
+// demande de code (il tient Baileys). Si le démon n'est pas prêt (WS en cours), l'appel lève
+// et buildPairingFlow retombe sur la voie « pending » (réessaie) — jamais un silence. Le QR
+// ASCII en attente reste hors de portée du frontend mince (le code suffit).
 const pairingFlow = buildPairingFlow({
   isElicitationSupported: () => clientSupportsElicitation,
   elicitInput: (params) => server.elicitInput(params),
-  requestPairingCode: async () => {
-    throw new Error(
-      "L'appairage par code via le démon n'est pas encore câblé (fiche 225) — utilise le repli terminal 'npm run pair'."
-    );
+  requestPairingCode: async (phoneNumber) => {
+    const d = await callDaemon("pair", { phone: phoneNumber });
+    return d.code;
   },
   currentQrArt: () => null,
   stateRoot: pairStateRoot,

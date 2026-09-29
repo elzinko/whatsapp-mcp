@@ -35,6 +35,7 @@ const VERBS = new Set([
   "session_check",
   "grant",
   "revoke",
+  "pair",
 ]);
 
 // `secret` : la valeur attendue. `undefined` désarme la vérification (utile pour un
@@ -83,6 +84,8 @@ function dispatch(backend, verb, req) {
       return backend.grant(req.channel, req.profile);
     case "revoke":
       return backend.revoke(req.channel);
+    case "pair":
+      return backend.pair(req.phone);
     default:
       // Inatteignable (filtré par VERBS plus haut) — garde-fou de complétude.
       throw new Error(`verbe inconnu : ${verb}`);

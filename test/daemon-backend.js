@@ -300,6 +300,25 @@ async function main() {
     check("recent(copro, canal du profil) -> lit le canal", backend.recent(s.session, "a@g.us", 10, "copro").jid === "a@g.us");
   }
 
+  // 10. pair : le backend délègue à wa.requestPairingCode (le démon tient Baileys, fiche 225).
+  //     Le frontend PROPOSE (élicite le numéro), le démon EXÉCUTE — jamais l'inverse (ADR-0005).
+  {
+    let seen = null;
+    const wa = {
+      requestPairingCode: async (phone) => {
+        seen = phone;
+        return "ABCD-1234";
+      },
+    };
+    const sessions = new SessionRegistry(tmpSessionsDir());
+    const backend = buildBackend(wa, sessions);
+    const r = await backend.pair("+33612345678");
+    check(
+      "backend.pair délègue à wa.requestPairingCode et renvoie le code",
+      seen === "+33612345678" && r.code === "ABCD-1234"
+    );
+  }
+
   console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
   process.exit(failed ? 1 : 0);
 }

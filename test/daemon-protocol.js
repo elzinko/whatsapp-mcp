@@ -74,6 +74,9 @@ function fakeBackend({ grants = [], ceiling = grants } = {}) {
       if (denied.length > 0) throw new Error(`hors grants ∩ plafond : ${denied.join(", ")}`);
       return { channels: (channels || []).map((jid) => ({ jid, subject: jid })) };
     },
+    pair(phone) {
+      return { code: `CODE-${String(phone).slice(-4)}` };
+    },
     // Aides de test, hors contrat.
     _seedMessages: (jid, msgs) => messages.set(jid, msgs),
   };
@@ -205,6 +208,15 @@ try {
     check("session_check(canal ok) -> ok:true + channels résolus", res.ok === true && res.data.channels[0].jid === "a@g.us");
     res = await handleRequest(backend, { verb: "session_check", channels: ["z@g.us"] });
     check("session_check(hors périmètre) -> refus", res.ok === false && /grants ∩ plafond/.test(res.error));
+  }
+
+  // ============================================================
+  // 7) pair : appairage via le démon (le frontend propose, le démon exécute — fiche 225)
+  // ============================================================
+  {
+    const backend = fakeBackend();
+    const res = await handleRequest(backend, { verb: "pair", phone: "+33612345678" });
+    check("pair(phone) -> ok:true + code d'appairage", res.ok === true && typeof res.data.code === "string" && res.data.code.length > 0);
   }
 } catch (e) {
   console.error("Erreur test:", e);
