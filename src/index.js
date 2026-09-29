@@ -326,7 +326,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
       case "list_groups": {
         if (await nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
-        const d = await callDaemon("list_groups");
+        const d = await callDaemon("list_groups", { profile: config.profile });
         let groups = d.groups;
         // Marquage inSession : le registre vit côté démon — on relit le scope du jeton via
         // status(session) plutôt que de tenir un registre local.
@@ -370,7 +370,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
               ". Le grant n'a pas été accordé."
           );
         }
-        return ok(await callDaemon("grant", { channel: args.channel }));
+        return ok(await callDaemon("grant", { channel: args.channel, profile: config.profile }));
       }
 
       case "revoke_channel":
@@ -385,7 +385,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         //    en réécho des entrées fournies — anti-oracle). Refus ici = zéro consentement.
         let checked;
         try {
-          checked = await callDaemon("session_check", { channels: requested });
+          checked = await callDaemon("session_check", { channels: requested, profile: config.profile });
         } catch (e) {
           return fail(e?.message || String(e));
         }
@@ -398,7 +398,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
 
         // 3. Création côté démon (déjà consentie) : le jeton et son TTL viennent du registre.
-        const d = await callDaemon("session_open", { channels: requested, ttlMs });
+        const d = await callDaemon("session_open", { channels: requested, ttlMs, profile: config.profile });
         log(`Session ouverte (${String(d.session).slice(0, 8)}…) : ${checked.channels.map((c) => c.subject).join(", ")} — expire ${d.expiresAt}`);
         return ok({ session: d.session, expiresAt: d.expiresAt, channels: checked.channels });
       }
@@ -419,7 +419,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           );
         }
         const limit = Number.isInteger(args.limit) ? args.limit : 50;
-        const d = await callDaemon("recent", { session: args.session, jid: args.channel, limit });
+        const d = await callDaemon("recent", { session: args.session, jid: args.channel, limit, profile: config.profile });
         return ok({
           channel: { jid: d.jid, subject: d.subject },
           returned: d.messages.length,

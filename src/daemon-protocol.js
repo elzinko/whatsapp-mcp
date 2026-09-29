@@ -70,17 +70,17 @@ function dispatch(backend, verb, req) {
     case "status":
       return backend.status(req.session);
     case "list_groups":
-      return backend.listGroups();
+      return backend.listGroups(req.profile);
     case "recent":
-      return backend.recent(req.session, req.jid, req.limit);
+      return backend.recent(req.session, req.jid, req.limit, req.profile);
     case "session_open":
-      return backend.sessionOpen(req.channels, req.ttlMs);
+      return backend.sessionOpen(req.channels, req.ttlMs, req.profile);
     case "session_close":
       return backend.sessionClose(req.session);
     case "session_check":
-      return backend.sessionCheck(req.channels);
+      return backend.sessionCheck(req.channels, req.profile);
     case "grant":
-      return backend.grant(req.channel);
+      return backend.grant(req.channel, req.profile);
     case "revoke":
       return backend.revoke(req.channel);
     default:

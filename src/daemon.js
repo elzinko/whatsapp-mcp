@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { Settings } from "./settings.js";
 import { Allowlist } from "./allowlist.js";
+import { Profiles } from "./profiles.js";
 import { WhatsAppClient, log } from "./whatsapp.js";
 import { SessionRegistry } from "./sessions.js";
 import { handleRequest } from "./daemon-protocol.js";
@@ -45,7 +46,18 @@ export function appendAudit(logFile, entry) {
 // Backend RÉEL du protocole (ADR-0008 action 1/5) : héberge le SessionRegistry
 // (migré depuis la couche application) et applique le périmètre session ∩ grant ∩
 // plafond DANS `recent` et `sessionOpen` — c'est ça, "vérifié côté démon".
-export function buildBackend(wa, sessions) {
+export function buildBackend(wa, sessions, profiles) {
+  // Bornage par PROFIL (fiche 20260917211902225) : le démon CAPTE sans profil (il est
+  // partagé par tous les frontends). Mais chaque frontend passe SON profil (WHATSAPP_PROFILE)
+  // comme borne PAR REQUÊTE — le démon l'applique ici, car lui seul a la résolution nom→JID.
+  // Le frontend DÉCIDE la borne, le démon l'APPLIQUE. Inerte si le frontend n'en déclare pas ;
+  // sinon fail-closed (profil inconnu -> rien), comme l'ancien _profileHas.
+  const subjectOf = (jid) => wa.settings.grants?.get(jid)?.subject || wa.knownGroups?.get(jid) || jid;
+  const inProfile = (profile, jid, subject) => {
+    if (!profile) return true;
+    profiles?.refresh?.();
+    return profiles ? profiles.permits(profile, jid, subject ?? subjectOf(jid)) : true;
+  };
   return {
     // status(session?) — le frontend mince (fiche 20260917211902225) n'a pas de connexion
     // WhatsApp ni de registre : il lit TOUT ici. `registered` lui sert à décider s'il guide
@@ -60,52 +72,53 @@ export function buildBackend(wa, sessions) {
         session: resolved
           ? {
               expiresAt: resolved.expiresAt,
-              channels: resolved.channels.map((jid) => ({
-                jid,
-                subject: wa.settings.grants.get(jid)?.subject || wa.knownGroups?.get(jid) || jid,
-              })),
+              channels: resolved.channels.map((jid) => ({ jid, subject: subjectOf(jid) })),
             }
           : null,
         activeSessions: resolved ? undefined : sessions.list().length,
       };
     },
-    async listGroups() {
-      return wa.listGroups();
+    // profile (fiche 225) : le frontend passe son WHATSAPP_PROFILE ; on masque ce qui est au
+    // plafond mais hors de ce profil, et on recompte hiddenOutsideProfile en conséquence.
+    async listGroups(profile) {
+      const res = await wa.listGroups();
+      if (!profile) return res;
+      profiles?.refresh?.();
+      const visible = res.groups.filter((g) => inProfile(profile, g.id, g.subject || g.name));
+      return {
+        ...res,
+        groups: visible,
+        hiddenOutsideProfile: (res.hiddenOutsideProfile || 0) + (res.groups.length - visible.length),
+      };
     },
-    // Périmètre : le jeton doit résoudre une session, et le canal demandé doit être
-    // DANS cette session (pas seulement autorisé ailleurs) ET dans le grant ∩ plafond
-    // couru par recentFor (whatsapp.js#_inScope, ADR-0002 §6).
-    recent(token, jid, limit) {
+    // Périmètre : le jeton doit résoudre une session, et le canal demandé doit être DANS cette
+    // session (pas seulement autorisé ailleurs), dans le grant ∩ plafond couru par recentFor
+    // (whatsapp.js#_inScope, ADR-0002 §6) ET dans le profil du frontend (fiche 225).
+    recent(token, jid, limit, profile) {
       wa.allowlist.refresh(); // fraîcheur AVANT les vérifs _inScope (comme index.js:379)
       const session = sessions.resolve(token);
       if (!session) throw new Error("Session invalide, expirée ou fermée. Ouvre une session avec session_open.");
-      // NOTE (finding #6, décision de contrat SKIPPED volontairement) : le démon
-      // attend un JID exact dans `jid`, pas un nom de groupe — la résolution nom->JID
-      // (wa._resolveToJid) reste du ressort du frontend (fiche child B,
-      // 20260917211902225). Refuser ici un nom serait un changement de comportement
-      // hors scope de cette fiche.
-      // Le frontend mince peut passer un NOM ; le démon a knownGroups, il résout (le
-      // commentaire « JID exact » d'avant #225 ne tient plus — la résolution vient ici).
+      // Le frontend mince peut passer un NOM ; le démon a knownGroups, il résout (fiche 225).
       const targetJid = jid ? wa._resolveToJid(jid) : (session.channels.length === 1 ? session.channels[0] : null);
       if (!targetJid) throw new Error("Plusieurs canaux dans cette session : précise 'jid'.");
       if (!session.channels.includes(targetJid)) {
         throw new Error(`Canal hors périmètre de la session : ${targetJid}.`);
       }
+      if (!inProfile(profile, targetJid)) {
+        throw new Error(`Canal hors du profil actif : « ${subjectOf(targetJid)} ».`);
+      }
       return wa.recentFor(targetJid, limit);
     },
-    // Périmètre vérifié AVANT toute création de session : chaque canal demandé doit
-    // être à la fois autorisé (settings.has, un grant existant) ET dans le plafond ∩
-    // profil actif (wa._inScope) — même garde que l'ingestion (whatsapp.js#_ingest).
-    sessionOpen(channels, ttlMs) {
+    // Périmètre vérifié AVANT toute création de session : chaque canal demandé doit être
+    // autorisé (settings.has), dans le plafond (wa._inScope) ET dans le profil du frontend.
+    sessionOpen(channels, ttlMs, profile) {
       wa.allowlist.refresh(); // fraîcheur AVANT les vérifs _inScope (comme index.js:379)
       const jids = (channels || []).map((c) => wa._resolveToJid(c));
-      const denied = jids.filter((jid) => !(wa.settings.has(jid) && wa._inScope(jid)));
+      const denied = jids.filter((jid) => !(wa.settings.has(jid) && wa._inScope(jid) && inProfile(profile, jid)));
       if (denied.length > 0) {
         throw new Error(`Canal hors grants ∩ plafond, refusé : ${denied.join(", ")}.`);
       }
-      // Coercition comme index.js:393 : un ttlMs non entier ou <= 0 (chaîne, négatif,
-      // absent) retombe sur le défaut du registre plutôt que de créer une session déjà
-      // expirée, ou de faire lever un RangeError plus loin (Date invalide).
+      // Coercition comme index.js:393 : un ttlMs non entier ou <= 0 retombe sur le défaut.
       const ttl = Number.isInteger(ttlMs) && ttlMs > 0 ? ttlMs : undefined;
       const session = sessions.create(jids, ttl);
       return { session: session.id, expiresAt: session.expiresAt, channels: session.channels };
@@ -113,15 +126,19 @@ export function buildBackend(wa, sessions) {
     sessionClose(token) {
       return { closed: sessions.close(token) };
     },
-    // session_check(channels) — validation SANS création ni prompt (fiche 20260917211902225).
-    // Le frontend mince l'appelle AVANT de demander le consentement, pour ne JAMAIS prompter
-    // sur un canal hors périmètre (parité avec l'ancien index.js : « refus avant tout prompt »).
-    // Renvoie les {jid, subject} résolus (pour nommer le prompt), ou refuse en réécho des
-    // ENTRÉES fournies (anti-oracle : jamais un JID que l'appelant n'a pas donné lui-même).
-    sessionCheck(channels) {
+    // session_check(channels, profile) — validation SANS création ni prompt (fiche 225). Le
+    // frontend l'appelle AVANT le consentement, pour ne JAMAIS prompter sur un canal hors
+    // périmètre (parité « refus avant prompt »). Refuse en réécho des ENTRÉES fournies
+    // (anti-oracle). Le profil du frontend borne au même titre que grant ∩ plafond.
+    sessionCheck(channels, profile) {
       wa.allowlist.refresh();
-      const pairs = (channels || []).map((c) => ({ input: c, jid: wa._resolveToJid(c) }));
-      const denied = pairs.filter(({ jid }) => !(wa.settings.has(jid) && wa._inScope(jid)));
+      const pairs = (channels || []).map((c) => {
+        const jid = wa._resolveToJid(c);
+        return { input: c, jid, subject: subjectOf(jid) };
+      });
+      const denied = pairs.filter(
+        ({ jid, subject }) => !(wa.settings.has(jid) && wa._inScope(jid) && inProfile(profile, jid, subject))
+      );
       if (denied.length > 0) {
         throw new Error(
           `Hors grants ∩ plafond, refusé avant toute demande de consentement : ` +
@@ -129,19 +146,17 @@ export function buildBackend(wa, sessions) {
             `Utilise 'grant_channel' (le canal doit aussi être dans le plafond, édité à la main) d'abord.`
         );
       }
-      return {
-        channels: pairs.map(({ jid }) => ({
-          jid,
-          subject: wa.settings.grants.get(jid)?.subject || wa.knownGroups?.get(jid) || jid,
-        })),
-      };
+      return { channels: pairs.map(({ jid, subject }) => ({ jid, subject })) };
     },
     // grant/revoke (fiche 20260917211902225) : mutations persistantes des grants. Le
     // CONSENTEMENT a déjà eu lieu AU FRONTEND (Touch ID/élicitation) — ici `wa.confirmGrant`
-    // est null (cf. main()), donc `grantChannel` ne présente AUCUN prompt. Le démon
-    // RÉ-APPLIQUE quand même le plafond : `grantChannel` refuse un canal hors allowlist
-    // (défense en profondeur, ADR-0008 §5). `revokeChannel` retire le grant et son store.
-    grant(channel) {
+    // est null (cf. main()), donc `grantChannel` ne présente AUCUN prompt. Le démon RÉ-APPLIQUE
+    // le plafond (grantChannel refuse hors allowlist, ADR-0008 §5) ET le profil du frontend.
+    grant(channel, profile) {
+      if (profile) {
+        const jid = wa._resolveToJid(channel);
+        if (!inProfile(profile, jid)) throw new Error(`Canal hors du profil actif : « ${subjectOf(jid)} ».`);
+      }
       return wa.grantChannel(channel);
     },
     revoke(channel) {
@@ -260,6 +275,10 @@ export async function main() {
   // appeler match() (le stub inerte n'en a pas).
   const wa = new WhatsAppClient({ ...config, profile: "" }, settings, allowlist, null, deps);
   const sessions = new SessionRegistry(config.sessionsDir, { defaultTtlMs: config.sessionTtlMs });
+  // Profils (fiche 0004) : le démon ne les applique PAS à la capture (il capte pour tous les
+  // frontends). Il s'en sert seulement pour BORNER une requête au profil que le frontend lui
+  // passe (fiche 225) — d'où le chargement ici, indépendant du profile:"" de wa.
+  const profiles = new Profiles(config.profilesFile).load();
 
   // Verrou `auth/` AVANT tout (fiche 0009, partagé avec src/index.js). Un second
   // démon (ou un serveur legacy encore vivant) le trouve tenu et SORT ici, sans
@@ -279,7 +298,7 @@ export async function main() {
   // que ce process tourne, client ouvert ou non (critère de la fiche).
   wa.start().catch((e) => log("Echec démarrage WhatsApp:", e?.message));
 
-  const backend = buildBackend(wa, sessions);
+  const backend = buildBackend(wa, sessions, profiles);
   const secret = readOrCreateSecret(config.daemonSecretFile);
   await serveDaemon(backend, {
     socketPath: config.daemonSocket,

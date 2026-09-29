@@ -24,6 +24,7 @@ check(
 check("index.js parle au démon (daemon-client)", /daemon-client\.js/.test(src));
 check("index.js ne prend pas le verrou auth/ (acquireLock absent)", !/acquireLock/.test(src));
 check("index.js garde le consentement au frontend (buildSessionConsent)", /buildSessionConsent/.test(src));
+check("index.js borne par profil (passe config.profile au démon)", /profile:\s*config\.profile/.test(src));
 
 console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
 process.exit(failed ? 1 : 0);

@@ -260,6 +260,46 @@ async function main() {
     check("sessionCheck(hors périmètre) -> throw, AUCUNE session créée", threw !== null && sessions.list().length === 0);
   }
 
+  // 9. Bornage par PROFIL (fiche 225) : le démon capte sans profil, mais applique le profil
+  //    PASSÉ par le frontend, PAR REQUÊTE. Un canal grant ∩ plafond mais hors profil est refusé.
+  {
+    const { wa } = fakeWa(); // has & inScope true par défaut -> a et b sont grant ∩ plafond
+    wa.settings.grants = new Map([
+      ["a@g.us", { subject: "A" }],
+      ["b@g.us", { subject: "B" }],
+    ]);
+    // Profil « copro » ne couvre que a@g.us.
+    const profiles = { refresh() {}, permits: (name, jid) => name === "copro" && jid === "a@g.us" };
+    const sessions = new SessionRegistry(tmpSessionsDir());
+    const backend = buildBackend(wa, sessions, profiles);
+
+    // Sans profil (le frontend n'en déclare pas) : a ET b passent — INERTE.
+    check("session_check sans profil -> tout passe (inerte)", backend.sessionCheck(["a@g.us", "b@g.us"]).channels.length === 2);
+
+    // Avec profil copro : a couvert -> ok ; b hors profil -> refus.
+    check("session_check(copro, canal du profil) -> ok", backend.sessionCheck(["a@g.us"], "copro").channels[0].jid === "a@g.us");
+    let threw = null;
+    try {
+      backend.sessionCheck(["b@g.us"], "copro");
+    } catch (e) {
+      threw = e;
+    }
+    check("session_check(copro, canal HORS profil) -> refus", threw !== null);
+
+    // sessionOpen respecte aussi le profil (aucune session créée sur un refus).
+    let threw2 = null;
+    try {
+      await backend.sessionOpen(["b@g.us"], undefined, "copro");
+    } catch (e) {
+      threw2 = e;
+    }
+    check("sessionOpen(copro, hors profil) -> refus + aucune session", threw2 !== null && sessions.list().length === 0);
+
+    const s = await backend.sessionOpen(["a@g.us"], undefined, "copro");
+    check("sessionOpen(copro, canal du profil) -> session créée", !!s.session);
+    check("recent(copro, canal du profil) -> lit le canal", backend.recent(s.session, "a@g.us", 10, "copro").jid === "a@g.us");
+  }
+
   console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
   process.exit(failed ? 1 : 0);
 }
