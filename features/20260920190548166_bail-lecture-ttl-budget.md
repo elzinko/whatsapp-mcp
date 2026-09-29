@@ -75,6 +75,6 @@ vérifiables (expiration par le temps **et** refus par épuisement du budget —
 `evidence: none` (durcissement backend, aucun écran), dépendance externe **datée** (google-mcp
 ADR-0011, accès constaté le 2026-09-20). **Rattachée à l'épic « accès par session »** (`epic:`
 posé). Faisabilité : le registre de sessions vit désormais **dans le démon** (#44) — le bail s'y
-calcule, à câbler avec/après le frontend mince ([20260917211902225](20260917211902225_frontend-mcp-mince.md))
+calcule, à câbler avec/après le frontend mince ([20260917211902225](done/20260917211902225_frontend-mcp-mince.md))
 qui ouvre les sessions via la socket. Reste `idea` (P3, non prioritaire) : le gate `ready` la
 promouvra quand elle sera tirée.

@@ -73,4 +73,4 @@ append-only horodaté), `evidence: auto` (nouvelle console — capture d'écran 
 PR). **Dépendance** : le démon socle (#44, **interne**, livré) héberge l'admin ; google-mcp n'est
 qu'un **modèle d'inspiration**, pas une dépendance de build (l'admin est écrit de zéro ici) — donc
 pas de ligne « accès constaté » bloquante. Reste `idea`, **optionnelle et en dernier** dans
-l'épic 0005 : à tirer seulement après le frontend mince ([20260917211902225](20260917211902225_frontend-mcp-mince.md)).
+l'épic 0005 : à tirer seulement après le frontend mince ([20260917211902225](done/20260917211902225_frontend-mcp-mince.md)).
