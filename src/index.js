@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// Serveur MCP (stdio) exposant en LECTURE SEULE les groupes WhatsApp explicitement
-// autorisés. Voir docs/adr/0001-modele-d-acces-aux-canaux.md
+// Serveur MCP (stdio) — FRONTEND MINCE (fiche 20260917211902225, ADR-0008).
 //
-// Deux barrières :
-//   1. l'ingestion ne retient que les canaux autorisés (whatsapp.js#_ingest) ;
-//   2. les outils ne lisent que dans ces mêmes canaux.
-// Il n'existe aucun outil d'envoi : ce serveur ne peut pas écrire sur WhatsApp.
+// Il n'ouvre JAMAIS WhatsApp : il parle au DÉMON (src/daemon.js) par une socket Unix
+// locale (contrat NDJSON, src/daemon-protocol.js). Le démon détient Baileys, la capture,
+// le plafond, les grants et le registre de sessions. ICI vivent : le protocole MCP, le
+// CONSENTEMENT humain (Touch ID / élicitation — au plus près du client), la mise en forme
+// des réponses. Aucune connexion WhatsApp, aucun verrou auth/ (le démon le tient).
+//
+// Lecture seule (ADR-0001) : aucun outil d'envoi n'existe.
+
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -15,28 +20,54 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { config } from "./config.js";
-import { Settings } from "./settings.js";
-import { Allowlist } from "./allowlist.js";
-import { Profiles } from "./profiles.js";
 import { buildConfirmGrant, buildGrantConsent, buildSessionConsent } from "./consent.js";
-import { buildGuidedPairingRefusal, buildPairingFlow, attachQrArt } from "./pairing.js";
+import { buildGuidedPairingRefusal, buildPairingFlow } from "./pairing.js";
 import { readStrongAuthEnabled } from "./strongauth.js";
 import { checkPresence } from "./touchid.js";
-import { WhatsAppClient, log, toRecentMessage } from "./whatsapp.js";
-import { SessionRegistry } from "./sessions.js";
+import { toRecentMessage, log } from "./whatsapp.js";
 import { deployedStateRoot } from "./setup.js";
+import { request, ensureDaemonRunning } from "./daemon-client.js";
+import { readOrCreateSecret } from "./daemon-secret.js";
 
-const settings = new Settings(config.settingsFile).load();
-// Le plafond (ADR-0002). Au tout premier démarrage, il est généré depuis les grants
-// existants (migration sans régression) ; ensuite seul l'humain l'édite, à la main.
-const allowlist = new Allowlist(config.allowlistFile).bootstrap(settings);
-// Le profil (fiche 0004, ADR-0006) : seconde borne, opt-in par projet. Absent
-// (ni profiles.json ni WHATSAPP_PROFILE) -> couche inerte, comportement ADR-0002.
-const profile = new Profiles(config.profilesFile).load();
-const wa = new WhatsAppClient(config, settings, allowlist, profile);
-// Registre des sessions de lecture (fiche 20260902223310499). Filtre appliqué en
-// AMONT du domaine, dans cette couche application : whatsapp.js ne le connaît pas.
-const sessions = new SessionRegistry(config.sessionsDir, { defaultTtlMs: config.sessionTtlMs });
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DAEMON_SCRIPT = path.join(__dirname, "daemon.js");
+
+// Secret partagé local (ADR-0008 §5) : le frontend et le démon lisent le MÊME fichier
+// 0600 au state root (dérivé du même config). Garde-fou anti-parasite, PAS une auth.
+const secret = readOrCreateSecret(config.daemonSecretFile);
+
+// ensureDaemonRunning PARESSEUX : on ne réveille le démon qu'au PREMIER appel qui en a
+// besoin. Un outil purement local (whatsapp_help) n'en spawn aucun. Mémoïsé — une seule
+// garantie par process de frontend.
+let daemonReady = null;
+function ensureDaemon() {
+  if (!daemonReady) {
+    daemonReady = ensureDaemonRunning({
+      socketPath: config.daemonSocket,
+      secret,
+      logFile: config.daemonLogFile,
+      daemonScript: DAEMON_SCRIPT,
+    });
+  }
+  return daemonReady;
+}
+
+// Un appel au démon : garantit qu'il tourne, envoie la requête NDJSON, déballe la réponse
+// { ok, data, error }. Une erreur métier du démon (hors périmètre, session invalide…)
+// remonte comme une exception, rattrapée par le handler d'outil (fail()).
+async function callDaemon(verb, args = {}) {
+  await ensureDaemon();
+  const res = await request(config.daemonSocket, { verb, secret, ...args });
+  if (!res) throw new Error("Le démon ne répond pas (socket locale injoignable).");
+  if (!res.ok) throw new Error(res.error || `Échec du verbe « ${verb} ».`);
+  return res.data;
+}
+
+// « Rien n'est appairé » : le démon dit s'il a des identifiants WhatsApp (registered).
+async function nothingPairedYet() {
+  const d = await callDaemon("status");
+  return d?.registered !== true;
+}
 
 function humanDuration(ms) {
   if (ms % 3600000 === 0) return `${ms / 3600000} h`;
@@ -44,15 +75,8 @@ function humanDuration(ms) {
   return `${Math.round(ms / 1000)} s`;
 }
 
-// Un jeton résolu et sa subject list, pour composer messages d'erreur et de
-// consentement sans dupliquer la logique de résolution des noms.
-function subjectFor(jid) {
-  return wa.settings.grants.get(jid)?.subject || wa.knownGroups.get(jid) || jid;
-}
-
-// Aide concise, rendue par l'outil `whatsapp_help` (fiche 0011). Elle donne le MODÈLE
-// MENTAL (lecture seule · plafond · grant→lecture · note de sécurité) et INDIRIGE vers le
-// README (source de vérité) — elle ne recopie pas son détail volatil, qui périmerait.
+// Aide concise (fiche 0011) — MODÈLE MENTAL + indirection vers le README. Rendue localement,
+// aucun appel démon. (Texte inchangé depuis le monolithe.)
 const HELP_TEXT = `whatsapp-mcp — aide
 
 CE QUE C'EST
@@ -97,7 +121,7 @@ POUR ALLER PLUS LOIN
 Voir le README (sections « Outils exposés » et « Sessions ») — source de vérité, non
 recopiée ici.`;
 
-// --- Définition des outils MCP ---
+// --- Définition des outils MCP (inchangée depuis le monolithe) ---
 const TOOLS = [
   {
     name: "whatsapp_help",
@@ -240,20 +264,9 @@ const TOOLS = [
   },
 ];
 
-// Racine d'état à PORTER dans le repli terminal d'appairage (voie 2, revue Codex #40) :
-// renseignée seulement si le connecteur demandeur n'est PAS sur la racine par défaut
-// (ex. rail dev whatsapp-feat -> ~/.config/whatsapp-mcp-dev). Sinon `npm run pair`, lancé
-// dans un autre shell, retomberait sur la prod. undefined = racine par défaut.
+// Racine d'état à PORTER dans le repli terminal d'appairage (voie 2) : renseignée seulement
+// si le connecteur demandeur n'est PAS sur la racine par défaut (rail dev). undefined = défaut.
 const pairStateRoot = deployedStateRoot() === deployedStateRoot({}) ? undefined : deployedStateRoot();
-
-// « Rien n'est appairé » (fiche 20260916130039008) : le compte n'a PAS d'identifiants
-// WhatsApp enregistrés (creds.registered). Signal AUTORITAIRE, pas les grants — un logout
-// 401 efface auth/ mais conserve settings.json, donc un compte délié a grants>0 tout en
-// devant ré-appairer (revue Codex #40). En reconnexion réseau (registered=true, pas encore
-// « open »), registered reste vrai : on NE guide PAS, la reconnexion suffit.
-function nothingPairedYet() {
-  return !wa.isRegistered();
-}
 
 function ok(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -269,6 +282,9 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
+// Le client supporte-t-il l'élicitation ? Négocié à l'initialisation MCP.
+let clientSupportsElicitation = false;
+
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
   try {
@@ -277,148 +293,124 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: "text", text: HELP_TEXT }] };
 
       case "whatsapp_pair": {
-        // Garde alignée sur les 4 outils d'accès (nothingPairedYet) : un grant persisté
-        // prouve un appairage passé, donc en reconnexion réseau on NE re-sollicite PAS
-        // le numéro (sinon on demande une donnée perso pour rien — revue P1).
-        if (!nothingPairedYet()) {
-          return ok({
-            route: "already-paired",
-            message: "WhatsApp est déjà appairé. Rien à faire.",
-          });
+        // Un grant persisté prouve un appairage passé : en reconnexion, on ne re-sollicite pas.
+        if (!(await nothingPairedYet())) {
+          return ok({ route: "already-paired", message: "WhatsApp est déjà appairé. Rien à faire." });
         }
         const result = await pairingFlow();
         if (result.route === "declined") {
           return fail(`Appairage refusé par l'humain (${result.reason}).`);
         }
-        // Voie terminal (repli, ou pas d'élicitation) : ajoute le QR ASCII à la réponse
-        // d'outil (fiche 20260917180706311) — affichable en chat/Code, sans terminal.
-        // Voie élicitation : inchangé, le code est déjà dans le message (attachQrArt
-        // n'y touche pas). Jamais sur stdout : ce texte transite par le protocole MCP.
-        return ok(attachQrArt(result, wa.currentQrArt()));
+        // Interim (fiche 225) : le verbe d'appairage démon n'est pas encore câblé. La voie
+        // terminal (repli) guide toujours ; la voie élicitation lèvera si tentée.
+        return ok(result);
       }
 
       case "whatsapp_status": {
+        const d = await callDaemon("status", args.session ? { session: args.session } : {});
         const grantConsent = readStrongAuthEnabled(config.strongAuthFile)
           ? "Touch ID (présence physique — hiérarchie ADR-0003)"
           : clientSupportsElicitation
             ? "élicitation (formulaire rédigé par le serveur, hors de portée du LLM)"
             : "permissions du client MCP (le client ne supporte pas l'élicitation)";
-        // Balayage opportuniste (en plus de la purge paresseuse de resolve()).
-        sessions.purgeExpired();
-        const resolved = args.session ? sessions.resolve(args.session) : null;
+        // Le démon calcule déjà `session` (scope ou null) et `activeSessions` (omis si un
+        // jeton valide est porté — jamais le compte global à une conversation identifiée).
+        const { session: daemonSession, registered, ...rest } = d;
         return ok({
-          // Quelle build répond : « de985f3 » = version déployée figée, « dev » = lancée
-          // depuis le checkout (ADR-0007). C'est le repère pour vérifier après un deploy.
           version: config.deployedVersion,
-          ...wa.status(),
+          ...rest,
           grantConsent,
-          session: resolved
-            ? {
-                expiresAt: resolved.expiresAt,
-                channels: resolved.channels.map((jid) => ({ jid, subject: subjectFor(jid) })),
-              }
-            : "aucune session",
-          // Jamais le CONTENU des autres sessions à une conversation qui n'en porte
-          // pas le jeton — seulement leur nombre.
-          activeSessions: resolved ? undefined : sessions.list().length,
+          session: daemonSession ? daemonSession : "aucune session",
         });
       }
 
       case "list_groups": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
-        const { groups, hiddenOutsideAllowlist, hiddenOutsideProfile } = await wa.listGroups();
-        const resolvedSession = args.session ? sessions.resolve(args.session) : null;
-        const inSession = resolvedSession ? new Set(resolvedSession.channels) : null;
+        if (await nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
+        const d = await callDaemon("list_groups", { profile: config.profile });
+        let groups = d.groups;
+        // Marquage inSession : le registre vit côté démon — on relit le scope du jeton via
+        // status(session) plutôt que de tenir un registre local.
+        if (args.session) {
+          const st = await callDaemon("status", { session: args.session });
+          const inSession = new Set((st.session?.channels || []).map((c) => c.jid));
+          groups = groups.map((g) => ({ ...g, inSession: inSession.has(g.id) }));
+        }
         const notes = [];
-        if (hiddenOutsideAllowlist > 0)
+        if (d.hiddenOutsideAllowlist > 0)
           notes.push(
-            `${hiddenOutsideAllowlist} autre(s) groupe(s) existent mais sont hors du plafond : ils ne ` +
+            `${d.hiddenOutsideAllowlist} autre(s) groupe(s) existent mais sont hors du plafond : ils ne ` +
               `sont pas listables ici. Pour les voir et relever leur JID, l'humain lance ` +
               `« npm run list-groups » dans un terminal, puis ajoute l'entrée à la main dans ${config.allowlistFile}.`
           );
-        if (hiddenOutsideProfile > 0)
+        if (d.hiddenOutsideProfile > 0)
           notes.push(
-            `${hiddenOutsideProfile} groupe(s) sont AU plafond mais hors du profil actif` +
+            `${d.hiddenOutsideProfile} groupe(s) sont AU plafond mais hors du profil actif` +
               (config.profile ? ` « ${config.profile} »` : "") +
               ` : pour les voir dans ce projet, ajoute-les à ce profil dans ${config.profilesFile} ` +
               `(inutile de toucher au plafond, ils y sont déjà).`
           );
         return ok({
           count: groups.length,
-          groups: inSession ? groups.map((g) => ({ ...g, inSession: inSession.has(g.id) })) : groups,
-          hiddenOutsideAllowlist,
-          hiddenOutsideProfile,
+          groups,
+          hiddenOutsideAllowlist: d.hiddenOutsideAllowlist,
+          hiddenOutsideProfile: d.hiddenOutsideProfile,
           note: notes.length ? notes.join(" ") : undefined,
         });
       }
 
-      case "grant_channel":
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
-        return ok(await wa.grantChannel(args.channel));
+      case "grant_channel": {
+        if (await nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
+        // Consentement AU FRONTEND (le prompt nomme l'entrée fournie ; le démon connaît et
+        // applique le nom réel + le plafond). Puis le verbe `grant`, déjà consenti (ADR-0008 §5).
+        const consent = await grantConsent({ jid: args.channel, subject: args.channel });
+        if (!consent?.accepted) {
+          return fail(
+            `Autorisation refusée par l'humain pour « ${args.channel} »` +
+              (consent?.reason ? ` (${consent.reason})` : "") +
+              ". Le grant n'a pas été accordé."
+          );
+        }
+        return ok(await callDaemon("grant", { channel: args.channel, profile: config.profile }));
+      }
 
       case "revoke_channel":
-        return ok(wa.revokeChannel(args.channel));
+        return ok(await callDaemon("revoke", { channel: args.channel }));
 
       case "session_open": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
+        if (await nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         const requested = Array.isArray(args.channels) ? args.channels : [];
         if (requested.length === 0) return fail("Fournis au moins un canal ('channels').");
 
-        let pairs;
+        // 1. Valide le périmètre AVANT tout prompt (le démon refuse hors grants ∩ plafond,
+        //    en réécho des entrées fournies — anti-oracle). Refus ici = zéro consentement.
+        let checked;
         try {
-          // On garde l'ENTRÉE d'origine à côté du JID résolu, pour ne jamais divulguer un
-          // JID que l'appelant n'aurait pas fourni lui-même (cf. le refus ci-dessous).
-          pairs = requested.map((c) => ({ input: c, jid: wa._resolveToJid(c) }));
+          checked = await callDaemon("session_check", { channels: requested, profile: config.profile });
         } catch (e) {
           return fail(e?.message || String(e));
         }
 
-        // Vérification ⊆ grants ∩ plafond ∩ profil AVANT tout prompt (décision 4 de la
-        // fiche + profil ADR-0006) : le reçu du consentement doit dire exactement ce qu'il
-        // accorde, et le profil borne session_open comme les autres chemins (Codex PR #34).
-        wa.allowlist.refresh();
-        const denied = pairs.filter(({ jid }) => !wa.settings.has(jid) || !wa._inScope(jid));
-        if (denied.length > 0) {
-          return fail(
-            `Hors grants ∩ plafond, refusé avant toute demande de consentement : ` +
-              // On réécho UNIQUEMENT l'entrée fournie par l'appelant, jamais le JID résolu :
-              // `_resolveToJid` transforme un NOM en son JID (via knownGroups) même hors
-              // plafond ; renvoyer ce JID ferait de session_open un oracle nom→JID pour des
-              // groupes que list_groups masque volontairement (revue Codex #25). Réécho de
-              // l'entrée telle quelle : l'appelant l'a déjà, ça ne divulgue rien de neuf.
-              `${denied.map(({ input }) => `« ${input} »`).join(", ")}. ` +
-              `Utilise 'grant_channel' (le canal doit aussi être dans le plafond, édité à la main) d'abord.`
-          );
-        }
-        const jids = pairs.map((p) => p.jid);
-
+        // 2. Consentement (Touch ID / élicitation) — le geste humain vit au frontend.
         const ttlMs = Number.isInteger(args.ttlMs) && args.ttlMs > 0 ? args.ttlMs : config.sessionTtlMs;
-        const subjects = jids.map(subjectFor);
-        const consent = await sessionConsent({ subjects, ttlMs });
-        if (!consent.accepted) {
-          return fail(
-            `Session refusée par l'humain` + (consent.reason ? ` (${consent.reason})` : "") + "."
-          );
+        const consent = await sessionConsent({ subjects: checked.channels.map((c) => c.subject), ttlMs });
+        if (!consent?.accepted) {
+          return fail(`Session refusée par l'humain` + (consent?.reason ? ` (${consent.reason})` : "") + ".");
         }
 
-        sessions.purgeExpired();
-        const session = sessions.create(jids, ttlMs);
-        log(`Session ouverte (${session.id.slice(0, 8)}…) : ${subjects.join(", ")} — expire ${session.expiresAt}`);
-        return ok({
-          session: session.id,
-          expiresAt: session.expiresAt,
-          channels: jids.map((jid) => ({ jid, subject: subjectFor(jid) })),
-        });
+        // 3. Création côté démon (déjà consentie) : le jeton et son TTL viennent du registre.
+        const d = await callDaemon("session_open", { channels: requested, ttlMs, profile: config.profile });
+        log(`Session ouverte (${String(d.session).slice(0, 8)}…) : ${checked.channels.map((c) => c.subject).join(", ")} — expire ${d.expiresAt}`);
+        return ok({ session: d.session, expiresAt: d.expiresAt, channels: checked.channels });
       }
 
       case "session_close": {
         if (!args.session) return fail("Fournis le jeton 'session' à fermer.");
-        const closed = sessions.close(args.session);
-        return ok({ session: args.session, closed });
+        const d = await callDaemon("session_close", { session: args.session });
+        return ok({ session: args.session, closed: d.closed });
       }
 
       case "get_recent_messages": {
-        if (nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
+        if (await nothingPairedYet()) return fail(buildGuidedPairingRefusal(clientSupportsElicitation, pairStateRoot));
         if (!args.session) {
           return fail(
             "Aucune session : cet outil exige un jeton de session. Ouvre-en une avec " +
@@ -426,44 +418,17 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
               "jeton dans 'session'."
           );
         }
-        const session = sessions.resolve(args.session);
-        if (!session) {
-          return fail(
-            "Session invalide, expirée ou déjà fermée. Ouvre-en une nouvelle avec 'session_open'."
-          );
-        }
-
-        let jid;
-        if (args.channel) {
-          jid = wa._resolveToJid(args.channel);
-          if (!session.channels.includes(jid)) {
-            return fail(
-              `Canal hors du périmètre de cette session (« ${subjectFor(jid)} »). ` +
-                `Ouvre une nouvelle session avec 'session_open' incluant ce canal.`
-            );
-          }
-        } else if (session.channels.length === 1) {
-          jid = session.channels[0];
-        } else if (session.channels.length === 0) {
-          return fail("Cette session ne porte aucun canal.");
-        } else {
-          const noms = session.channels.map((j) => `« ${subjectFor(j)} »`).join(", ");
-          return fail(`Plusieurs canaux dans cette session : précise 'channel' parmi ${noms}.`);
-        }
-
-        // Re-vérification grant ∩ plafond COURANT (défense en profondeur) : c'est
-        // exactement ce que fait wa.recentFor, INCHANGÉ (domaine, ADR-0002).
         const limit = Number.isInteger(args.limit) ? args.limit : 50;
-        const { jid: outJid, subject, messages, buffered } = wa.recentFor(jid, limit);
+        const d = await callDaemon("recent", { session: args.session, jid: args.channel, limit, profile: config.profile });
         return ok({
-          channel: { jid: outJid, subject },
-          returned: messages.length,
-          buffered,
+          channel: { jid: d.jid, subject: d.subject },
+          returned: d.messages.length,
+          buffered: d.buffered,
           note:
-            messages.length === 0
+            d.messages.length === 0
               ? "Aucun message en mémoire pour ce canal. Le tampon se remplit avec l'historique reçu à la connexion et les nouveaux messages."
               : undefined,
-          messages: messages.map(toRecentMessage),
+          messages: d.messages.map(toRecentMessage),
         });
       }
 
@@ -475,13 +440,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
-// L'élicitation est la seule façon d'afficher à l'humain une question RÉDIGÉE PAR LE
-// SERVEUR, dont la réponse ne transite jamais par le LLM (ADR-0001, ADR-0002). Quand le
-// client la supporte, chaque grant passe par ce consentement. Sinon, repli : le grant
-// reste borné par le plafond, et la confirmation d'appel d'outil du client (quand elle
-// existe) reste le garde-fou conversationnel.
-let clientSupportsElicitation = false;
-
+// L'élicitation est la seule façon d'afficher une question RÉDIGÉE PAR LE SERVEUR, dont la
+// réponse ne transite jamais par le LLM (ADR-0002). Le consentement vit ICI, au frontend
+// (ADR-0008 §3) — au plus près de la personne. Le démon ne présente jamais de prompt.
 server.oninitialized = () => {
   const caps = server.getClientCapabilities() || {};
   clientSupportsElicitation = !!caps.elicitation;
@@ -490,27 +451,32 @@ server.oninitialized = () => {
 };
 
 const elicitationConsent = buildConfirmGrant(server, () => clientSupportsElicitation, log);
-wa.confirmGrant = buildGrantConsent({
+const grantConsent = buildGrantConsent({
   isStrongAuthEnabled: () => readStrongAuthEnabled(config.strongAuthFile),
   checkPresence,
   elicitationConsent,
   log,
 });
 
-// Flux d'appairage guidé (fiche 20260916130039008), outil `whatsapp_pair` : demande
-// le numéro par élicitation (voie 1) si le client le permet, sinon renvoie la
-// procédure terminal (voie 2). Ne s'appaire jamais lui-même (ADR-0005).
+// Flux d'appairage guidé (fiche 20260916130039008), câblé au DÉMON (fiche 225) : le frontend
+// élicite le numéro (voie 1) ou renvoie la procédure terminal (voie 2) ; le démon EXÉCUTE la
+// demande de code (il tient Baileys). Si le démon n'est pas prêt (WS en cours), l'appel lève
+// et buildPairingFlow retombe sur la voie « pending » (réessaie) — jamais un silence. Le QR
+// ASCII en attente reste hors de portée du frontend mince (le code suffit).
 const pairingFlow = buildPairingFlow({
   isElicitationSupported: () => clientSupportsElicitation,
   elicitInput: (params) => server.elicitInput(params),
-  requestPairingCode: (phoneNumber) => wa.requestPairingCode(phoneNumber),
-  currentQrArt: () => wa.currentQrArt(),
+  requestPairingCode: async (phoneNumber) => {
+    const d = await callDaemon("pair", { phone: phoneNumber });
+    return d.code;
+  },
+  currentQrArt: () => null,
   stateRoot: pairStateRoot,
   log,
 });
 
-// Consentement de session_open (fiche 20260902223310499) : composé séparément de
-// buildGrantConsent — pas de repli « permissions client », voir consent.js.
+// Consentement de session_open (fiche 20260902223310499) : pas de repli « permissions
+// client » (voir consent.js). Le geste humain vit au frontend.
 const sessionConsent = buildSessionConsent({
   isStrongAuthEnabled: () => readStrongAuthEnabled(config.strongAuthFile),
   checkPresence,
@@ -521,32 +487,12 @@ const sessionConsent = buildSessionConsent({
 });
 
 async function main() {
-  // 0) Verrou auth/ AVANT tout (fiche 0009). Si un autre process vivant le tient, on SORT
-  //    ici — sans ouvrir le transport MCP. Sinon le perdant resterait un serveur MCP zombie,
-  //    WhatsApp indisponible en permanence (revue Codex #27). L'acquisition est synchrone.
-  try {
-    wa.acquireLock();
-  } catch (e) {
-    if (e?.code === "ELOCKED") {
-      log(e.message);
-      process.exit(1); // perdant du verrou : ne pas servir en MCP
-    }
-    throw e;
-  }
-
-  // 1) Démarre WhatsApp (affiche un QR sur stderr si pas encore appairé).
-  //    On n'attend pas la connexion : le serveur MCP doit répondre tout de suite.
-  //    start() re-prend le verrou (réentrant, même PID) — inoffensif.
-  wa.start().catch((e) => log("Echec démarrage WhatsApp:", e?.message));
-
-  // 2) Démarre le transport MCP sur stdio.
+  // Pas de verrou auth/ ici : le DÉMON le tient (ADR-0008 §4). Le frontend ne touche jamais
+  // WhatsApp ni Baileys. On sert le MCP tout de suite ; le démon est réveillé PARESSEUSEMENT
+  // au premier appel qui en a besoin (ensureDaemon), pas au démarrage.
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  const granted = settings.list();
-  log(
-    "Serveur MCP prêt (stdio, LECTURE SEULE). Canaux autorisés:",
-    granted.length ? granted.map((g) => g.subject || g.jid).join(", ") : "(aucun)"
-  );
+  log("Frontend MCP mince prêt (stdio, LECTURE SEULE) — parle au démon:", config.daemonSocket);
 }
 
 main().catch((e) => {

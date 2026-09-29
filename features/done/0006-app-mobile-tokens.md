@@ -5,7 +5,7 @@ type: epic
 priority: P3
 version:
 epic:
-status: idea
+status: superseded
 ready:
 pr:
 created: 2026-07-18
@@ -45,3 +45,11 @@ accès réseau ni mobile. Cette fiche va dans l'autre sens (un consommateur **pa
 Thomas ne retient plus le sujet mobile pour l'instant. **Garée** comme vision d'origine
 consignée, hors du flux actif ; à rouvrir seulement si un consommateur réseau devient réel.
 (Non supprimée — recoverable ; dire le mot pour l'effacer.)
+
+### Clôturée le 2026-09-25 — superseded
+
+Revue de validité (backlog `list` du 2026-09-25) : cette fiche **diverge du local-first** que
+tient volontairement le produit de référence (google-mcp-multi-account, 100 % local). Aucun
+consommateur réseau réel depuis la mise en garde du 11/09. **Clôturée** (`status: superseded`) et
+déplacée dans `done/`, hors flux actif. **Récupérable** : si un besoin réseau apparaît, repasser
+`status: idea` et ressortir la fiche de `done/`.

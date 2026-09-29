@@ -4,10 +4,13 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { startFakeDaemon } from "./helpers/fake-daemon.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverEntry = path.resolve(__dirname, "..", "src", "index.js");
@@ -17,20 +20,33 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wa-smoke-"));
 const settingsFile = path.join(tmpDir, "settings.json");
 const allowlistFile = path.join(tmpDir, "allowlist.json");
 
+// Frontend MINCE (fiche 225) : il parle à un DÉMON. On démarre un démon FACTICE (Baileys
+// bidon) qu'on contrôle, sur une socket COURTE (le tmpdir macOS est trop profond pour un
+// chemin de socket Unix) et un secret connu. Le frontend le pingue et ne spawn rien.
+const socketPath = path.join(os.tmpdir(), `wa-smoke-${process.pid}-${Date.now()}.sock`);
+const secretFile = path.join(tmpDir, "daemon.secret");
+const secret = `smoke-${crypto.randomUUID()}`;
+fs.writeFileSync(secretFile, secret, { mode: 0o600 });
+
+const env = {
+  ...process.env,
+  // Empêche toute vraie connexion d'interférer : dossier auth jetable, réglages jetables
+  WHATSAPP_AUTH_DIR: "./auth-test",
+  WHATSAPP_SETTINGS_FILE: settingsFile,
+  WHATSAPP_ALLOWLIST_FILE: allowlistFile,
+  WHATSAPP_GROUP_ID: "",
+  WHATSAPP_GROUP_NAME: "",
+  WHATSAPP_PERSIST: "false", // pas d'écriture disque pendant le test de fumée
+  WHATSAPP_DAEMON_SOCKET: socketPath,
+  WHATSAPP_DAEMON_SECRET_FILE: secretFile,
+  WHATSAPP_DAEMON_LOG_FILE: path.join(tmpDir, "daemon.log"),
+};
+
 const transport = new StdioClientTransport({
   command: process.execPath, // node
   args: [serverEntry],
-  stderr: "inherit", // laisse passer logs + QR du serveur
-  env: {
-    ...process.env,
-    // Empêche toute vraie connexion d'interférer : dossier auth jetable, réglages jetables
-    WHATSAPP_AUTH_DIR: "./auth-test",
-    WHATSAPP_SETTINGS_FILE: settingsFile,
-    WHATSAPP_ALLOWLIST_FILE: allowlistFile,
-    WHATSAPP_GROUP_ID: "",
-    WHATSAPP_GROUP_NAME: "",
-    WHATSAPP_PERSIST: "false", // pas d'écriture disque pendant le test de fumée
-  },
+  stderr: "inherit", // laisse passer les logs du serveur
+  env,
 });
 
 const client = new Client({ name: "smoke-test", version: "0.0.0" }, { capabilities: {} });
@@ -41,7 +57,9 @@ function check(label, cond) {
   if (!cond) failed = true;
 }
 
+let daemon = null;
 try {
+  daemon = await startFakeDaemon(env, { socketPath, secret });
   await client.connect(transport);
   console.log("--- Handshake MCP réussi ---");
 
@@ -127,6 +145,7 @@ try {
   try {
     await client.close();
   } catch {}
+  if (daemon) daemon.stop();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 

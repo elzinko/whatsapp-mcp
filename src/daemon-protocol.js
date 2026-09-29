@@ -22,7 +22,21 @@
 // la réponse/l'erreur. C'est ce qui permet de le prouver hermétiquement avec un
 // backend factice (test/daemon-protocol.js), comme avec le backend réel (daemon.js).
 
-const VERBS = new Set(["status", "list_groups", "recent", "session_open", "session_close"]);
+// `grant`/`revoke` (fiche 20260917211902225) sont des verbes MUTANTS : ils changent la
+// liste des canaux captés. Le consentement humain (Touch ID/élicitation) a lieu AU
+// FRONTEND (ADR-0008 §3) ; le démon ne présente aucun prompt, mais RÉ-APPLIQUE le plafond
+// (grant ⊆ allowlist) côté backend — défense en profondeur (ADR-0008 §5).
+const VERBS = new Set([
+  "status",
+  "list_groups",
+  "recent",
+  "session_open",
+  "session_close",
+  "session_check",
+  "grant",
+  "revoke",
+  "pair",
+]);
 
 // `secret` : la valeur attendue. `undefined` désarme la vérification (utile pour un
 // appel direct au protocole, ex. tests qui ne veulent pas exercer cette couche).
@@ -55,15 +69,23 @@ export async function handleRequest(backend, req, { secret, audit } = {}) {
 function dispatch(backend, verb, req) {
   switch (verb) {
     case "status":
-      return backend.status();
+      return backend.status(req.session);
     case "list_groups":
-      return backend.listGroups();
+      return backend.listGroups(req.profile);
     case "recent":
-      return backend.recent(req.session, req.jid, req.limit);
+      return backend.recent(req.session, req.jid, req.limit, req.profile);
     case "session_open":
-      return backend.sessionOpen(req.channels, req.ttlMs);
+      return backend.sessionOpen(req.channels, req.ttlMs, req.profile);
     case "session_close":
       return backend.sessionClose(req.session);
+    case "session_check":
+      return backend.sessionCheck(req.channels, req.profile);
+    case "grant":
+      return backend.grant(req.channel, req.profile);
+    case "revoke":
+      return backend.revoke(req.channel);
+    case "pair":
+      return backend.pair(req.phone);
     default:
       // Inatteignable (filtré par VERBS plus haut) — garde-fou de complétude.
       throw new Error(`verbe inconnu : ${verb}`);
