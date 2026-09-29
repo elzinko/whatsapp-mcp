@@ -51,7 +51,7 @@ moment de les tirer).
    Le socle. Sort Baileys, la capture, l'archive, le plafond et le registre de sessions des
    clients vers un démon unique, qui expose une socket Unix locale (contrat NDJSON). Porte l'ADR
    (cycle de vie + contrat + frontière de sécurité).
-2. **[20260917211902225](20260917211902225_frontend-mcp-mince.md) — Le frontend MCP mince.**
+2. **[20260917211902225](done/20260917211902225_frontend-mcp-mince.md) — Le frontend MCP mince.**
    Réécrit le serveur stdio en client mince du démon ; l'élicitation / Touch ID reste au
    frontend. Dépend de (1).
 3. **[20260917211902355](20260917211902355_admin-monitoring-lecture-seule.md) — Admin de
