@@ -92,6 +92,17 @@ export function buildBackend(wa, sessions) {
     sessionClose(token) {
       return { closed: sessions.close(token) };
     },
+    // grant/revoke (fiche 20260917211902225) : mutations persistantes des grants. Le
+    // CONSENTEMENT a déjà eu lieu AU FRONTEND (Touch ID/élicitation) — ici `wa.confirmGrant`
+    // est null (cf. main()), donc `grantChannel` ne présente AUCUN prompt. Le démon
+    // RÉ-APPLIQUE quand même le plafond : `grantChannel` refuse un canal hors allowlist
+    // (défense en profondeur, ADR-0008 §5). `revokeChannel` retire le grant et son store.
+    grant(channel) {
+      return wa.grantChannel(channel);
+    },
+    revoke(channel) {
+      return wa.revokeChannel(channel);
+    },
   };
 }
 

@@ -22,7 +22,19 @@
 // la réponse/l'erreur. C'est ce qui permet de le prouver hermétiquement avec un
 // backend factice (test/daemon-protocol.js), comme avec le backend réel (daemon.js).
 
-const VERBS = new Set(["status", "list_groups", "recent", "session_open", "session_close"]);
+// `grant`/`revoke` (fiche 20260917211902225) sont des verbes MUTANTS : ils changent la
+// liste des canaux captés. Le consentement humain (Touch ID/élicitation) a lieu AU
+// FRONTEND (ADR-0008 §3) ; le démon ne présente aucun prompt, mais RÉ-APPLIQUE le plafond
+// (grant ⊆ allowlist) côté backend — défense en profondeur (ADR-0008 §5).
+const VERBS = new Set([
+  "status",
+  "list_groups",
+  "recent",
+  "session_open",
+  "session_close",
+  "grant",
+  "revoke",
+]);
 
 // `secret` : la valeur attendue. `undefined` désarme la vérification (utile pour un
 // appel direct au protocole, ex. tests qui ne veulent pas exercer cette couche).
@@ -64,6 +76,10 @@ function dispatch(backend, verb, req) {
       return backend.sessionOpen(req.channels, req.ttlMs);
     case "session_close":
       return backend.sessionClose(req.session);
+    case "grant":
+      return backend.grant(req.channel);
+    case "revoke":
+      return backend.revoke(req.channel);
     default:
       // Inatteignable (filtré par VERBS plus haut) — garde-fou de complétude.
       throw new Error(`verbe inconnu : ${verb}`);

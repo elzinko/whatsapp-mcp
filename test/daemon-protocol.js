@@ -2,9 +2,10 @@
 // PUR : aucune connexion Baileys, aucune socket — juste handleRequest(backend, req)
 // avec un BACKEND FACTICE qui reproduit le périmètre (session ∩ grant ∩ plafond)
 // exactement comme le fera le backend réel (daemon.js). Couvre :
-//   - les 5 verbes du contrat ;
+//   - les 7 verbes du contrat (5 lecture/session + grant/revoke, fiche 20260917211902225) ;
 //   - secret requis, refus journalisé sans secret / avec un mauvais secret ;
-//   - enforcement session ∩ grant ∩ plafond dans `recent` et `session_open`.
+//   - enforcement session ∩ grant ∩ plafond dans `recent` et `session_open` ;
+//   - grant/revoke dispatchés, plafond ré-appliqué côté backend.
 
 import { handleRequest } from "../src/daemon-protocol.js";
 
@@ -54,6 +55,19 @@ function fakeBackend({ grants = [], ceiling = grants } = {}) {
     },
     sessionClose(token) {
       return { closed: sessions.delete(token) };
+    },
+    // Verbes mutants (contrat étendu, fiche 20260917211902225). Le démon RÉ-APPLIQUE le
+    // plafond (défense en profondeur, ADR-0008 §5) ; le consentement, lui, a déjà eu lieu
+    // au frontend — le protocole ne présente jamais de prompt.
+    grant(channel) {
+      if (!ceilingSet.has(channel)) throw new Error(`hors plafond : ${channel}`);
+      grantSet.add(channel);
+      return { jid: channel, subject: channel, scope: "read", granted: true };
+    },
+    revoke(channel) {
+      const had = grantSet.delete(channel);
+      if (!had) throw new Error(`canal non autorisé : ${channel}`);
+      return { jid: channel, revoked: true };
     },
     // Aides de test, hors contrat.
     _seedMessages: (jid, msgs) => messages.set(jid, msgs),
@@ -150,6 +164,30 @@ try {
 
     res = await handleRequest(backend, { verb: "recent", session: "jeton-inconnu", jid: "a@g.us" });
     check("recent avec un jeton inconnu -> refus", res.ok === false);
+  }
+
+  // ============================================================
+  // 5) Verbes mutants grant / revoke (contrat étendu, fiche 20260917211902225)
+  //    Le protocole les DISPATCHE ; le plafond est ré-appliqué côté backend (le
+  //    consentement a déjà eu lieu au frontend, ADR-0008 §5).
+  // ============================================================
+  {
+    const backend = fakeBackend({ grants: [], ceiling: ["a@g.us"] });
+
+    let res = await handleRequest(backend, { verb: "grant", channel: "a@g.us" });
+    check("grant(canal au plafond) -> ok:true, granted", res.ok === true && res.data.granted === true);
+
+    res = await handleRequest(backend, { verb: "grant", channel: "hors@g.us" });
+    check("grant(canal hors plafond) -> refus (plafond ré-appliqué)", res.ok === false && /plafond/.test(res.error));
+
+    res = await handleRequest(backend, { verb: "session_open", channels: ["a@g.us"] });
+    check("session_open après grant -> ok:true (le grant a pris effet)", res.ok === true);
+
+    res = await handleRequest(backend, { verb: "revoke", channel: "a@g.us" });
+    check("revoke(canal autorisé) -> ok:true, revoked", res.ok === true && res.data.revoked === true);
+
+    res = await handleRequest(backend, { verb: "revoke", channel: "a@g.us" });
+    check("revoke(canal déjà retiré) -> refus", res.ok === false);
   }
 } catch (e) {
   console.error("Erreur test:", e);

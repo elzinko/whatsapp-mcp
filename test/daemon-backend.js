@@ -174,6 +174,42 @@ async function main() {
     check("message hors grant/plafond -> jamais capturé", wa.recentFor("b@g.us").messages.length === 0);
   }
 
+  // 6. grant/revoke : le backend délègue à wa.grantChannel/revokeChannel, et le démon
+  //    ne demande JAMAIS de consentement (wa.confirmGrant est null — le geste humain vit
+  //    au frontend, ADR-0008 §3/§5). On prouve la délégation ET l'absence de prompt.
+  {
+    const calls = [];
+    const wa = {
+      confirmGrant: null,
+      allowlist: { refresh() {} },
+      async grantChannel(channel) {
+        calls.push(["grant", channel]);
+        // Un démon qui présenterait un prompt serait un bug de frontière : ici
+        // confirmGrant DOIT rester null (le consentement est au frontend).
+        if (wa.confirmGrant) throw new Error("le démon ne doit jamais demander de consentement");
+        return { jid: channel, subject: "Groupe A", scope: "read", granted: true };
+      },
+      revokeChannel(channel) {
+        calls.push(["revoke", channel]);
+        return { jid: channel, subject: "Groupe A", revoked: true };
+      },
+    };
+    const sessions = new SessionRegistry(tmpSessionsDir());
+    const backend = buildBackend(wa, sessions);
+
+    const g = await backend.grant("a@g.us");
+    check(
+      "backend.grant délègue à wa.grantChannel (sans consentement)",
+      calls[0]?.[0] === "grant" && calls[0]?.[1] === "a@g.us" && g.granted === true
+    );
+
+    const r = await backend.revoke("a@g.us");
+    check(
+      "backend.revoke délègue à wa.revokeChannel",
+      calls[1]?.[0] === "revoke" && r.revoked === true
+    );
+  }
+
   console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
   process.exit(failed ? 1 : 0);
 }
