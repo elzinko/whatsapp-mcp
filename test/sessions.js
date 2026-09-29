@@ -17,6 +17,7 @@
 // Code ET Desktop — est non-automatisable par construction (voir
 // test/elicitation.js) : relevé humain, DÉFÉRÉ de ce test.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -235,7 +236,7 @@ try {
     // partagés via l'env. Le démon lit les mêmes settings/allowlist/creds/sessions seedés.
     const socketPath = path.join(os.tmpdir(), `wa-sess-${process.pid}-${Date.now()}.sock`);
     const secretFile = path.join(tmpDir, "daemon.secret");
-    const secret = `sess-${Math.random().toString(36).slice(2)}`;
+    const secret = `sess-${crypto.randomUUID()}`;
     fs.writeFileSync(secretFile, secret, { mode: 0o600 });
     const baseEnv = {
       ...process.env,

@@ -4,6 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,7 +25,7 @@ const allowlistFile = path.join(tmpDir, "allowlist.json");
 // chemin de socket Unix) et un secret connu. Le frontend le pingue et ne spawn rien.
 const socketPath = path.join(os.tmpdir(), `wa-smoke-${process.pid}-${Date.now()}.sock`);
 const secretFile = path.join(tmpDir, "daemon.secret");
-const secret = `smoke-${Math.random().toString(36).slice(2)}`;
+const secret = `smoke-${crypto.randomUUID()}`;
 fs.writeFileSync(secretFile, secret, { mode: 0o600 });
 
 const env = {
