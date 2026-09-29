@@ -30,6 +30,7 @@ import { initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
 import { SessionRegistry, DEFAULT_TTL_MS } from "../src/sessions.js";
 import { buildSessionConsent } from "../src/consent.js";
 import { TOUCHID } from "../src/touchid.js";
+import { startFakeDaemon } from "./helpers/fake-daemon.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverEntry = path.resolve(__dirname, "..", "src", "index.js");
@@ -228,22 +229,36 @@ try {
     fs.writeFileSync(allowlistFile, JSON.stringify({ version: 1, channels: [CHAN_A, CHAN_B] }));
     fs.writeFileSync(strongAuthFile, JSON.stringify({ enabled: false })); // OFF -> élicitation
 
+    // Frontend MINCE (fiche 225) : le registre de sessions vit dans le DÉMON. On démarre un
+    // démon FACTICE (Baileys bidon) qu'on contrôle ; les DEUX frontends ci-dessous lui
+    // parlent. Socket courte (tmpdir macOS trop profond pour une socket Unix) + secret connu,
+    // partagés via l'env. Le démon lit les mêmes settings/allowlist/creds/sessions seedés.
+    const socketPath = path.join(os.tmpdir(), `wa-sess-${process.pid}-${Date.now()}.sock`);
+    const secretFile = path.join(tmpDir, "daemon.secret");
+    const secret = `sess-${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(secretFile, secret, { mode: 0o600 });
+    const baseEnv = {
+      ...process.env,
+      WHATSAPP_AUTH_DIR: authDir,
+      WHATSAPP_SETTINGS_FILE: settingsFile,
+      WHATSAPP_ALLOWLIST_FILE: allowlistFile,
+      WHATSAPP_STRONG_AUTH_FILE: strongAuthFile,
+      WHATSAPP_SESSIONS_DIR: sessionsDir,
+      WHATSAPP_GROUP_ID: "",
+      WHATSAPP_GROUP_NAME: "",
+      WHATSAPP_PERSIST: "false",
+      WHATSAPP_DAEMON_SOCKET: socketPath,
+      WHATSAPP_DAEMON_SECRET_FILE: secretFile,
+      WHATSAPP_DAEMON_LOG_FILE: path.join(tmpDir, "daemon.log"),
+    };
+    const daemon = await startFakeDaemon(baseEnv, { socketPath, secret });
+
     function spawnServer({ declareElicitation }) {
       const transport = new StdioClientTransport({
         command: process.execPath,
         args: [serverEntry],
         stderr: "ignore",
-        env: {
-          ...process.env,
-          WHATSAPP_AUTH_DIR: authDir,
-          WHATSAPP_SETTINGS_FILE: settingsFile,
-          WHATSAPP_ALLOWLIST_FILE: allowlistFile,
-          WHATSAPP_STRONG_AUTH_FILE: strongAuthFile,
-          WHATSAPP_SESSIONS_DIR: sessionsDir,
-          WHATSAPP_GROUP_ID: "",
-          WHATSAPP_GROUP_NAME: "",
-          WHATSAPP_PERSIST: "false",
-        },
+        env: baseEnv,
       });
       const client = new Client(
         { name: "sessions-test", version: "0.0.0" },
@@ -388,6 +403,7 @@ try {
       } catch {}
     }
 
+    daemon.stop();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 } catch (e) {
