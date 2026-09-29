@@ -32,6 +32,7 @@ const VERBS = new Set([
   "recent",
   "session_open",
   "session_close",
+  "session_check",
   "grant",
   "revoke",
 ]);
@@ -76,6 +77,8 @@ function dispatch(backend, verb, req) {
       return backend.sessionOpen(req.channels, req.ttlMs);
     case "session_close":
       return backend.sessionClose(req.session);
+    case "session_check":
+      return backend.sessionCheck(req.channels);
     case "grant":
       return backend.grant(req.channel);
     case "revoke":

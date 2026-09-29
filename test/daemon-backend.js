@@ -238,6 +238,28 @@ async function main() {
     check("status() sans jeton -> registered exposé aussi", noTok.registered === true);
   }
 
+  // 8. session_check : valide sans créer de session (le prompt suit, côté frontend).
+  {
+    const { wa } = fakeWa({ hasGrant: (jid) => jid === "a@g.us" });
+    wa.settings.grants = new Map([["a@g.us", { subject: "Groupe A" }]]);
+    const sessions = new SessionRegistry(tmpSessionsDir());
+    const backend = buildBackend(wa, sessions);
+
+    const okc = backend.sessionCheck(["a@g.us"]);
+    check(
+      "sessionCheck(ok) -> {jid,subject} résolu, AUCUNE session créée",
+      okc.channels[0].jid === "a@g.us" && okc.channels[0].subject === "Groupe A" && sessions.list().length === 0
+    );
+
+    let threw = null;
+    try {
+      backend.sessionCheck(["b@g.us"]);
+    } catch (e) {
+      threw = e;
+    }
+    check("sessionCheck(hors périmètre) -> throw, AUCUNE session créée", threw !== null && sessions.list().length === 0);
+  }
+
   console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
   process.exit(failed ? 1 : 0);
 }

@@ -69,6 +69,11 @@ function fakeBackend({ grants = [], ceiling = grants } = {}) {
       if (!had) throw new Error(`canal non autorisé : ${channel}`);
       return { jid: channel, revoked: true };
     },
+    sessionCheck(channels) {
+      const denied = (channels || []).filter((jid) => !inScope(jid));
+      if (denied.length > 0) throw new Error(`hors grants ∩ plafond : ${denied.join(", ")}`);
+      return { channels: (channels || []).map((jid) => ({ jid, subject: jid })) };
+    },
     // Aides de test, hors contrat.
     _seedMessages: (jid, msgs) => messages.set(jid, msgs),
   };
@@ -188,6 +193,18 @@ try {
 
     res = await handleRequest(backend, { verb: "revoke", channel: "a@g.us" });
     check("revoke(canal déjà retiré) -> refus", res.ok === false);
+  }
+
+  // ============================================================
+  // 6) session_check : valide le périmètre SANS créer de session (fiche 20260917211902225)
+  //    Le frontend mince l'appelle pour refuser AVANT le prompt de consentement.
+  // ============================================================
+  {
+    const backend = fakeBackend({ grants: ["a@g.us"], ceiling: ["a@g.us"] });
+    let res = await handleRequest(backend, { verb: "session_check", channels: ["a@g.us"] });
+    check("session_check(canal ok) -> ok:true + channels résolus", res.ok === true && res.data.channels[0].jid === "a@g.us");
+    res = await handleRequest(backend, { verb: "session_check", channels: ["z@g.us"] });
+    check("session_check(hors périmètre) -> refus", res.ok === false && /grants ∩ plafond/.test(res.error));
   }
 } catch (e) {
   console.error("Erreur test:", e);

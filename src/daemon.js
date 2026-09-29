@@ -84,7 +84,9 @@ export function buildBackend(wa, sessions) {
       // (wa._resolveToJid) reste du ressort du frontend (fiche child B,
       // 20260917211902225). Refuser ici un nom serait un changement de comportement
       // hors scope de cette fiche.
-      const targetJid = jid || (session.channels.length === 1 ? session.channels[0] : null);
+      // Le frontend mince peut passer un NOM ; le démon a knownGroups, il résout (le
+      // commentaire « JID exact » d'avant #225 ne tient plus — la résolution vient ici).
+      const targetJid = jid ? wa._resolveToJid(jid) : (session.channels.length === 1 ? session.channels[0] : null);
       if (!targetJid) throw new Error("Plusieurs canaux dans cette session : précise 'jid'.");
       if (!session.channels.includes(targetJid)) {
         throw new Error(`Canal hors périmètre de la session : ${targetJid}.`);
@@ -110,6 +112,29 @@ export function buildBackend(wa, sessions) {
     },
     sessionClose(token) {
       return { closed: sessions.close(token) };
+    },
+    // session_check(channels) — validation SANS création ni prompt (fiche 20260917211902225).
+    // Le frontend mince l'appelle AVANT de demander le consentement, pour ne JAMAIS prompter
+    // sur un canal hors périmètre (parité avec l'ancien index.js : « refus avant tout prompt »).
+    // Renvoie les {jid, subject} résolus (pour nommer le prompt), ou refuse en réécho des
+    // ENTRÉES fournies (anti-oracle : jamais un JID que l'appelant n'a pas donné lui-même).
+    sessionCheck(channels) {
+      wa.allowlist.refresh();
+      const pairs = (channels || []).map((c) => ({ input: c, jid: wa._resolveToJid(c) }));
+      const denied = pairs.filter(({ jid }) => !(wa.settings.has(jid) && wa._inScope(jid)));
+      if (denied.length > 0) {
+        throw new Error(
+          `Hors grants ∩ plafond, refusé avant toute demande de consentement : ` +
+            `${denied.map(({ input }) => `« ${input} »`).join(", ")}. ` +
+            `Utilise 'grant_channel' (le canal doit aussi être dans le plafond, édité à la main) d'abord.`
+        );
+      }
+      return {
+        channels: pairs.map(({ jid }) => ({
+          jid,
+          subject: wa.settings.grants.get(jid)?.subject || wa.knownGroups?.get(jid) || jid,
+        })),
+      };
     },
     // grant/revoke (fiche 20260917211902225) : mutations persistantes des grants. Le
     // CONSENTEMENT a déjà eu lieu AU FRONTEND (Touch ID/élicitation) — ici `wa.confirmGrant`
