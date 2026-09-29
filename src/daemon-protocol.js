@@ -67,7 +67,7 @@ export async function handleRequest(backend, req, { secret, audit } = {}) {
 function dispatch(backend, verb, req) {
   switch (verb) {
     case "status":
-      return backend.status();
+      return backend.status(req.session);
     case "list_groups":
       return backend.listGroups();
     case "recent":

@@ -47,8 +47,27 @@ export function appendAudit(logFile, entry) {
 // plafond DANS `recent` et `sessionOpen` — c'est ça, "vérifié côté démon".
 export function buildBackend(wa, sessions) {
   return {
-    status() {
-      return { ...wa.status(), activeSessions: sessions.list().length };
+    // status(session?) — le frontend mince (fiche 20260917211902225) n'a pas de connexion
+    // WhatsApp ni de registre : il lit TOUT ici. `registered` lui sert à décider s'il guide
+    // l'appairage (nothingPairedYet). Un jeton valide fait renvoyer SON scope (résolu côté
+    // démon, le registre y vit depuis #44) ; sans jeton, seulement le NOMBRE de sessions
+    // actives — jamais le contenu d'autrui (parité avec l'ancien index.js).
+    status(session) {
+      const resolved = session ? sessions.resolve(session) : null;
+      return {
+        ...wa.status(),
+        registered: wa.isRegistered(),
+        session: resolved
+          ? {
+              expiresAt: resolved.expiresAt,
+              channels: resolved.channels.map((jid) => ({
+                jid,
+                subject: wa.settings.grants.get(jid)?.subject || wa.knownGroups?.get(jid) || jid,
+              })),
+            }
+          : null,
+        activeSessions: resolved ? undefined : sessions.list().length,
+      };
     },
     async listGroups() {
       return wa.listGroups();

@@ -210,6 +210,34 @@ async function main() {
     );
   }
 
+  // 7. status(session) : le démon résout le jeton (le registre y vit, #44) et expose
+  //    `registered` — ce dont le frontend mince a besoin, faute de connexion et de registre.
+  //    Sans jeton : le NOMBRE de sessions actives ; avec un jeton valide : SON scope seul.
+  {
+    const { wa } = fakeWa({ hasGrant: (jid) => jid === "a@g.us" });
+    wa.status = () => ({ state: "open", readOnly: true, grantedChannels: [] });
+    wa.isRegistered = () => true;
+    wa.settings.grants = new Map([["a@g.us", { subject: "Groupe A" }]]);
+    const sessions = new SessionRegistry(tmpSessionsDir());
+    const backend = buildBackend(wa, sessions);
+
+    const { session } = await backend.sessionOpen(["a@g.us"]);
+
+    const withTok = backend.status(session);
+    check("status(jeton valide) -> registered exposé", withTok.registered === true);
+    check(
+      "status(jeton valide) -> SON scope (channels résolus avec subject)",
+      Array.isArray(withTok.session?.channels) &&
+        withTok.session.channels[0].jid === "a@g.us" &&
+        withTok.session.channels[0].subject === "Groupe A"
+    );
+    check("status(jeton valide) -> activeSessions OMIS (pas le compte global)", withTok.activeSessions === undefined);
+
+    const noTok = backend.status();
+    check("status() sans jeton -> session null + compte de sessions actives", noTok.session === null && noTok.activeSessions === 1);
+    check("status() sans jeton -> registered exposé aussi", noTok.registered === true);
+  }
+
   console.log(failed ? "\n=== RÉSULTAT: ÉCHEC ===" : "\n=== RÉSULTAT: SUCCÈS ===");
   process.exit(failed ? 1 : 0);
 }
