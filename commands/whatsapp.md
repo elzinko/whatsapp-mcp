@@ -18,7 +18,14 @@ Route selon le PREMIER mot de la sous-commande :
   renvoie un QR ou un code, guide l'humain pas à pas.
 - `groups` → appelle `list_groups`. Liste les groupes visibles, chacun avec son
   identifiant de canal, pour pouvoir en autoriser un ensuite.
-- `recent <canal>` → appelle `get_recent_messages` sur le canal donné (2ᵉ mot).
+- `recent <canal>` → lecture des messages récents d'un canal (2ᵉ mot).
+  `get_recent_messages` EXIGE un jeton de session : ne l'appelle JAMAIS seul.
+  Enchaîne :
+  1. `session_open` sur le canal donné. Le canal doit déjà être autorisé
+     (`grant_channel`) ; sinon l'outil refuse — dis alors à l'humain de lancer
+     `/whatsapp grant <canal>` d'abord.
+  2. `get_recent_messages` avec le jeton rendu par `session_open` et le canal.
+  3. `session_close` sur ce jeton une fois la lecture faite.
   Si aucun canal n'est fourni, demande-le d'abord, ne devine pas.
 - `grant <canal>` → appelle `grant_channel` sur le canal donné. Ce geste exige
   une présence physique (Touch ID) : laisse l'outil mener le consentement, ne le
